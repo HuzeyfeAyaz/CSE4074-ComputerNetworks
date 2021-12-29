@@ -1,0 +1,1 @@
+In this project we have used Python to build a simple chat application using sockets
