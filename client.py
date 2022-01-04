@@ -40,6 +40,7 @@ while True:
 
     try:
         # Now we want to loop over received messages (there might be more than one) and print them
+        select_user = False
         while True:
 
             # Receive our "header" containing username length, it's size is defined and constant
@@ -62,7 +63,21 @@ while True:
             message = client_socket.recv(message_length).decode('utf-8')
 
             # Print message
+            if not select_user and message != 'False':
+                print(message)
+                while True:
+                    try:
+                        user_to_connect_with = int(input("Select User: "))
+                        break
+                    except:
+                        print('Please type a valid number!')
+                select_user = True
+                message = user_to_connect_with.encode('utf-8')
+                message_header = f"{len(message):<{HEADER_LENGTH}}".encode('utf-8')
+                client_socket.send(message_header + message)
+                continue
             print(f'{username} > {message}')
+            
 
     except IOError as e:
         # This is normal on non blocking connections - when there are no incoming data error is going to be raised
