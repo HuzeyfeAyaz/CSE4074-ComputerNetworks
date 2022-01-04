@@ -28,7 +28,7 @@ class Server:
                 return False
 
             message_length = int(message_header.decode('utf-8').strip())
-            return client_socket.recv(message_length)
+            return {'header': message_header, 'data': client_socket.recv(message_length)}
 
         except:
             return False
@@ -49,9 +49,10 @@ class Server:
 
         # Add accepted socket to select.select() list
         # sockets_list.append(client_socket)
+        self.SOCKETS_LIST.append(client_socket)
 
         # Also save username and username header
-        self.CLIENTS[client_socket] = user
+        self.CLIENTS[client_socket] = user['data'].decode('utf-8')
         print('Accepted new connection from {}:{}, username: {}'.format(*client_address, user['data'].decode('utf-8')))
         return True, client_socket
 
@@ -59,40 +60,57 @@ class Server:
         read_sockets, _, exception_sockets = select.select(list(self.SOCKETS_LIST), [], list(self.SOCKETS_LIST))
         for notified_socket in read_sockets:
             if notified_socket == self.server_socket:
-                if notified_socket not in self.CLIENTS:
-                    is_connected, client_ = self.establish_connection()
-                    self.SOCKETS_LIST.append(client_)
-                    if is_connected:
-                        client_.send(self.get_online_users()) # send online user list
-                else:
-                    message = self.receive_message(notified_socket).decode('utf-8')
-                    self.PEERS[notified_socket] = self.SOCKETS_LIST[message]
-                    self.PEERS[self.SOCKETS_LIST[message]] = notified_socket
+                is_connected, client_ = self.establish_connection()
+                if is_connected:
+                    client_.send(self.peer_connection()) # send online user list
 
             else:
-                message = self.receive_message(notified_socket)
-                if message is False:
-                    print('Closed connection from: {}'.format(self.CLIENTS[notified_socket]['data'].decode('utf-8')))
+                if not self.PEERS.get(notified_socket, False):
+                    message = self.receive_message(notified_socket)
+                    message = message['data'].decode('utf-8')
+                    self.peer_connection(notified_socket,message)
+                    self.PEERS[notified_socket] = self.SOCKETS_LIST[message]
+                    self.PEERS[self.SOCKETS_LIST[message]] = notified_socket
+                else:
+                    message = self.receive_message(notified_socket)
+                    if message is False:
+                        print('Closed connection from: {}'.format(self.CLIENTS[notified_socket]['data'].decode('utf-8')))
 
-                # Remove from list for socket.socket()
-                    self.SOCKETS_LIST.remove(notified_socket)
+                        # Remove from list for socket.socket()
+                        self.SOCKETS_LIST.remove(notified_socket)
 
-                # Remove from our list of users
-                    del self.CLIENTS[notified_socket]
+                        # Remove from our list of users
+                        del self.CLIENTS[notified_socket]
 
-                    continue
-                
-            # Get user by notified socket, so we will know who sent the message
-                user = self.CLIENTS[notified_socket]
+                        continue
+                    
+                    # Get user by notified socket, so we will know who sent the message
+                    user = self.CLIENTS[notified_socket]
 
-                print(f'Received message from {user["sender"].decode("utf-8")}: {message["message"].decode("utf-8")}')
+                    print(f'Received message from {user}: {message["data"].decode("utf-8")}')
 
-                # Iterate over connected clients and broadcast message
-                self.PEERS[notified_socket].send(user['header'] + user['data'] + message['header'] + message['data'])
+                    # Iterate over connected clients and broadcast message
+                    self.PEERS[notified_socket].send(f"{len({user}):<{self.HEADER_LENGTH}}".encode('utf-8') + f'{user}'.encode('utf-8') + message['header'] + message['data'])
 
-    def get_online_users(self):
-        if len(self.SOCKETS_LIST) == 1:
-            return f"{len('False'):<{self.HEADER_LENGTH}}".encode('utf-8') + 'False'.encode('utf-8')
+    def peer_connection(self, client_=None, request=None):
+        if request is None:
+            message = f"{len(self.SOCKETS_LIST)-1} clients available what do you want to do?"
+            return f"{len(message):<{self.HEADER_LENGTH}}".encode('utf-8') + message.encode('utf-8')
+
+        message = request.split()
+        if len(message) < 2:
+            return False
+
+        if message[0] == 'chat_request':
+            for k, v in self.CLIENTS.items():
+                if message[1] == v:
+                    if not self.PEERS.get(k, False):
+                        new_message = f"user {self.CLIENTS[client_]} wants to get connect with you"
+                        k.send(f"{len(new_message):<{self.HEADER_LENGTH}}".encode('utf-8') + new_message.encode('utf-8'))
+                        
+                        
+            return True if message[1] in self.CLIENTS.values() else False
+
 
         online_users = 'Online Users:\n'
         for idx, socket in enumerate(self.SOCKETS_LIST[1:]):

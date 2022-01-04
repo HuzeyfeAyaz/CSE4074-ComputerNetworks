@@ -77,6 +77,9 @@ while True:
                 client_socket.send(message_header + message)
                 continue
             print(f'{username} > {message}')
+            # this is gonna be wild 
+            # 
+
             
 
     except IOError as e:
