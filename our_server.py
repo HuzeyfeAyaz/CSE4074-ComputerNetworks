@@ -105,9 +105,10 @@ class Server:
             for k, v in self.CLIENTS.items():
                 if message[1] == v:
                     if not self.PEERS.get(k, False):
-                        new_message = f"user {self.CLIENTS[client_]} wants to get connect with you"
+                        new_message = f"CHAT_REQUEST: {self.CLIENTS[client_]}"
                         k.send(f"{len(new_message):<{self.HEADER_LENGTH}}".encode('utf-8') + new_message.encode('utf-8'))
-                        
+                        # amına koyim bole ödevin 0<===3
+                        # XD
                         
             return True if message[1] in self.CLIENTS.values() else False
 
