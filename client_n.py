@@ -45,7 +45,7 @@ while True:
 # username = my_username.encode('utf-8')
 # username_header = f"{len(username):<{HEADER_LENGTH}}".encode('utf-8')
 # client_socket.send(username_header + username)
-print("out while 1")
+
 client_socket.setblocking(False)
 while True:
 
@@ -84,20 +84,7 @@ while True:
             message_length = int(message_header.decode('utf-8').strip())
             message = client_socket.recv(message_length).decode('utf-8')
 
-            # Print message
-            if not select_user and message != 'False':
-                print(message)
-                while True:
-                    try:
-                        user_to_connect_with = int(input("Select User: "))
-                        break
-                    except:
-                        print('Please type a valid number!')
-                select_user = True
-                message = user_to_connect_with.encode('utf-8')
-                message_header = f"{len(message):<{HEADER_LENGTH}}".encode('utf-8')
-                client_socket.send(message_header + message)
-                continue
+            # Print message               
             print(f'{username} > {message}')
             # this is gonna be wild 
             # 

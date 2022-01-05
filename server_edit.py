@@ -22,6 +22,7 @@ class Server:
     CLIENTS = {}  # key = socket, val = User object
     SOCKETS_LIST = []
     USER_REGISTRY = {}  # key = username, value = password
+    PEERS = {}
     MESSAGE_TYPES_IN = {
         "Register": 1,
         "Login": 2,
@@ -44,10 +45,10 @@ class Server:
         self.SOCKETS_LIST.append(self.server_socket)
         print(f'Listening for connections on {self.IP}:{self.PORT}...')
 
-    def send_message(self, user: User, msg_header: int, msg_data: str):
-        msg_header = f"{msg_header:<{self.HEADER_LENGTH}}".encode('utf-8')
-        total_msg = msg_header + msg_data
-        user.client_socket.send(total_msg.encode("utf-8"))
+    def send_message(self, user: User, msg_data_header: str, msg_data: str):
+        msg_header = f"{len(msg_data):<{self.HEADER_LENGTH}}".encode('utf-8')
+        total_msg = msg_header + msg_data_header.encode("utf-8") + msg_data.encode("utf-8")
+        user.client_socket.send(total_msg)
 
     def receive_message(self, client_socket):
         try:
@@ -70,7 +71,7 @@ class Server:
             _ = self.USER_REGISTRY[username]
             # if user already exists, send message to notify client
             self.send_message(
-                user, len("RegistrationDenied"), "RegistrationDenied")
+                user, "RegistrationDenied")
         except:
             self.USER_REGISTRY[username] = password  # add user to registry
             # self.send_message(
@@ -115,13 +116,16 @@ class Server:
                                     args=[user, username, password])
             t.start()
 
-        # elif message['header'] == self.MESSAGE_TYPES_IN["Login"]:
-        #     username, password = message['data'].split('*')
-        #     t = threading.Thread(target=self.loginUser,
-        #                          args=[user, username, password])
-        #     t.start()
+            # elif message['header'] == self.MESSAGE_TYPES_IN["Login"]:
+            #     username, password = message['data'].split('*')
+            #     t = threading.Thread(target=self.loginUser,
+            #                          args=[user, username, password])
+            #     t.start()
 
-            t.join()
+            # t.join()
+            # server_message = "SERVER".encode('utf-8')
+            # server_message_header = f"{len(server_message):<{self.HEADER_LENGTH}}".encode('utf-8')
+            # client_socket.send(server_message_header + server_message)      
             server_message = "Login Succesfull".encode('utf-8')
             server_message_header =  f"{len(server_message):<{self.HEADER_LENGTH}}".encode('utf-8')
             client_socket.send(server_message_header + server_message)
@@ -158,8 +162,50 @@ class Server:
             if notified_socket == self.server_socket:
                 is_connected, client_ = self.establish_connection()  # TODO
                 if is_connected:continue
-                else:
-                    print('unsuccesfull')
+            else:
+                message = self.receive_message(notified_socket)
+                message = message['data'].split()
+                if message[0] == 'search':
+                    for k, v in self.CLIENTS.items():
+                        if v.name == message[1]:
+                            if k not in self.PEERS:
+                                server_message = "SERVER".encode('utf-8')
+                                server_message_header = f"{len(server_message):<{self.HEADER_LENGTH}}".encode('utf-8')
+                                notified_socket.send(server_message_header + server_message)                
+
+                                message = f"{v.name} is online and available.".encode('utf-8')
+                                message_header =  f"{len(message):<{self.HEADER_LENGTH}}".encode('utf-8')
+                                notified_socket.send(message_header + message)    
+                            else:
+                                server_message = "SERVER".encode('utf-8')
+                                server_message_header = f"{len(server_message):<{self.HEADER_LENGTH}}".encode('utf-8')
+                                notified_socket.send(server_message_header + server_message)                
+
+                                message = f"{v.name} is busy.".encode('utf-8')
+                                message_header =  f"{len(message):<{self.HEADER_LENGTH}}".encode('utf-8')
+                                notified_socket.send(message_header + message)   
+                elif  message[0] == 'chat_request':
+                    for k, v in self.CLIENTS.items():
+                        if v.name == message[1]:
+                            server_message = "SERVER".encode('utf-8')
+                            server_message_header = f"{len(server_message):<{self.HEADER_LENGTH}}".encode('utf-8')
+                            k.send(server_message_header + server_message)
+
+                            message = f"{self.CLIENTS[notified_socket].name} send you chat request.".encode('utf-8')
+                            message_header =  f"{len(message):<{self.HEADER_LENGTH}}".encode('utf-8')
+                            k.send(message_header + message)  
+                elif message[0] == 'ok':
+                    for k, v in self.CLIENTS.items():
+                        if v.name == message[1]:
+                            server_message = "SERVER".encode('utf-8')
+                            server_message_header = f"{len(server_message):<{self.HEADER_LENGTH}}".encode('utf-8')
+                            notified_socket.send(server_message_header + server_message)
+
+                            message = f"{self.CLIENTS[notified_socket].name} accepted your chat request.".encode('utf-8')
+                            message_header =  f"{len(message):<{self.HEADER_LENGTH}}".encode('utf-8')
+                            notified_socket.send(message_header + message)    
+                            self.PEERS[k] = notified_socket
+                            self.PEERS[notified_socket] = k                
 
         for notified_socket in exception_sockets:
             self.remove_client(self.CLIENTS[notified_socket])
