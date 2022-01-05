@@ -8,8 +8,9 @@ import time
 class User:
     name = ""
 
-    def __init__(self, client_socket, socket_list_index) -> None:
-        self.client_socket = client_socket
+    def __init__(self, client_ip, client_port, socket_list_index) -> None:
+        self.client_ip = client_ip
+        self.client_port = client_port
         self.logged_in = False
         self.last_seen = datetime.now()
         self.socket_list_index = socket_list_index
@@ -44,8 +45,12 @@ class Server:
         self.SOCKETS_LIST.append(self.server_socket)
         print(f'Listening for connections on {self.IP}:{self.PORT}...')
 
-    def send_message(self, user: User, msg_header: int, msg_data: str):
-        user.client_socket.send()
+    def send_message(self, user: User, msg_data_header: int, msg_data_string: str):
+        message_string = f"{str(msg_data_header) + msg_data_string}".encode("utf-8")
+        message_header = f"{len(message_string):<{self.HEADER_LENGTH}}".encode(
+            'utf-8')
+        self.SOCKETS_LIST[user.socket_list_index].send(
+            message_header + message_string)
 
     def receive_message(self, client_socket):
         try:
@@ -54,12 +59,14 @@ class Server:
                 return False
             message_length = int(message_header.decode('utf-8').strip())
             message = client_socket.recv(message_length).decode('utf-8')
+            print("Message type: {}, message content: {}".format(
+                message[0], message[1:]))
             return {'header': message[0], 'data': message[1:]}
         except:
             return False
 
-    def createUserObject(self, client_socket):
-        user = User(client_socket)
+    def createUserObject(self, client_ip, client_port, client_socket_list_index):
+        user = User(client_ip, client_port, client_socket_list_index)
         return user
 
     def registerUser(self, user: User, username, password) -> None:
@@ -101,8 +108,9 @@ class Server:
 
         self.SOCKETS_LIST.append(client_socket)
         socket_list_index = len(self.SOCKETS_LIST) - 1
-        user = self.createUserObject(client_socket, socket_list_index)
-        self.CLIENTS[client_socket] = user
+        user = self.createUserObject(
+            client_address[0], client_address[1], socket_list_index)
+        self.CLIENTS[socket_list_index] = user
         print('Accepted new connection from {}:{}'.format(
             *client_address))
 
@@ -120,12 +128,12 @@ class Server:
         return True, client_socket
 
     def search(self, user: User, msg_data: str):
-        user.client_socket.send()   # TODO
+        self.SOCKET_LIST[user.socket_list_index].send()   # TODO
 
     def remove_client(self, user: User):
-        user.client_socket.close()
+        self.SOCKET_LIST[user.socket_list_index].close()
         self.SOCKETS_LIST.remove(user.socket_list_index)
-        del self.CLIENTS[user.client_socket]
+        del self.CLIENTS[user.socket_list_index]
 
     def find_dead_clients(self, interval: int, max_wait: int):
         while True:
@@ -148,8 +156,8 @@ class Server:
 
 if __name__ == '__main__':
     server = Server()
-    find_dead_client_thread = threading.Thread(
-        target=server.find_dead_clients, args=[30, 200])
-    find_dead_client_thread.start()
+    # find_dead_client_thread = threading.Thread(
+    #     target=server.find_dead_clients, args=[30, 200])
+    # find_dead_client_thread.start()
     while True:
         server.check_for_messages()
