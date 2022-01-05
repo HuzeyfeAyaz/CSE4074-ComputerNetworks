@@ -31,6 +31,7 @@ class Client:
         "LoginFailed": 2,
         "LoginSuccess": 3,
         "MessageIn": 4,
+        "SearchResult": 5,
     }
 
     username = None
@@ -79,14 +80,39 @@ class Client:
         msg_data = username + "*" + password
         self.send_message(
             self.PEERS["Server"], self.MESSAGE_TYPES_OUT["Register"], msg_data)
+        
+        self.SOCKET_LIST[0].setblocking(1)
+        answer = self.receive_message(self.SOCKET_LIST[0])
+        self.SOCKET_LIST[0].setblocking(False)
+
+        if answer:
+            print(f"Message type = {answer['header']}")
+            self.username, self.password = username, password
+            return True
+
 
     def search(self, users: list):
         msg_data = '*'.join(users)
         self.send_message(self.PEERS["Server"],
                           self.MESSAGE_TYPES_OUT["Search"], msg_data)
+        
+        self.SOCKET_LIST[0].setblocking(1)
+        answer = self.receive_message(self.SOCKET_LIST[0])
+        self.SOCKET_LIST[0].setblocking(False)
+
+        user_stats =  answer['data'].split('*')
+        available_users = {}
+        for ix, user_stat in enumerate(user_stats):
+            if user_stat.endswith("busy") or user_stat.endswith("exist"):
+                print(user_stat)
+            else:
+                available_users[users[ix]] = user_stat.split(' ')
+                print(f"{users[ix]} is available at destination: {':'.join(user_stat.split(' '))}")
+
+        return answer
 
     def send_chat_request(self, users: list):
-        self.search()
+        answer = self.search(users)
 
     def main_process(self):
         logged_in = False
@@ -101,8 +127,8 @@ class Client:
             my_input = input(f'{self.username} > ')
             if my_input == "QUIT":
                 break
-            if my_input.startswith() == "message":
-                users = my_input[6:].split(' ')
+            if my_input.startswith("message"):
+                users = my_input.strip().split(' ')[1:]
                 self.send_chat_request(users)
 
 
