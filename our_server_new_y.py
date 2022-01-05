@@ -8,10 +8,12 @@ import time
 class User:
     name = ""
 
-    def __init__(self, client_ip, client_port, socket_list_index) -> None:
+    def __init__(self, client_socket, client_ip, client_port, socket_list_index) -> None:
+        self.client_socket = client_socket
         self.client_ip = client_ip
         self.client_port = client_port
         self.logged_in = False
+        self.available = False #TODO set when available 
         self.last_seen = datetime.now()
         self.socket_list_index = socket_list_index
 
@@ -24,16 +26,17 @@ class Server:
     SOCKETS_LIST = []
     USER_REGISTRY = {}  # key = username, value = password
     MESSAGE_TYPES_IN = {
-        "Register": 1,
-        "Login": 2,
-        "Search": 3,
-        "KeepAlive": 4,
-        "Logout": 5,
+        "Register": "1",
+        "Login": "2",
+        "Search": "3",
+        "KeepAlive": "4",
+        "Logout": "5",
     }
     MESSAGE_TYPES_OUT = {
-        "RegistrationDenied": 1,
-        "LoginFailed": 2,
-        "LoginSuccess": 3,
+        "RegistrationDenied": "1",
+        "LoginFailed": "2",
+        "LoginSuccess": "3",
+        "SearchResult": "5",
     }
 
     def __init__(self) -> None:
@@ -45,8 +48,8 @@ class Server:
         self.SOCKETS_LIST.append(self.server_socket)
         print(f'Listening for connections on {self.IP}:{self.PORT}...')
 
-    def send_message(self, user: User, msg_data_header: int, msg_data_string: str):
-        message_string = f"{str(msg_data_header) + msg_data_string}".encode("utf-8")
+    def send_message(self, user: User, msg_data_header: str, msg_data_string=''):
+        message_string = f"{msg_data_header + msg_data_string}".encode("utf-8")
         message_header = f"{len(message_string):<{self.HEADER_LENGTH}}".encode(
             'utf-8')
         self.SOCKETS_LIST[user.socket_list_index].send(
@@ -65,8 +68,8 @@ class Server:
         except:
             return False
 
-    def createUserObject(self, client_ip, client_port, client_socket_list_index):
-        user = User(client_ip, client_port, client_socket_list_index)
+    def createUserObject(self, client_socket, client_ip, client_port, client_socket_list_index):
+        user = User(client_socket, client_ip, client_port, client_socket_list_index)
         return user
 
     def registerUser(self, user: User, username, password) -> None:
@@ -75,14 +78,16 @@ class Server:
             _ = self.USER_REGISTRY[username]
             # if user already exists, send message to notify client
             self.send_message(
-                user, self.MESSAGE_TYPES_OUT["RegistrationDenied"], None)
+                user, self.MESSAGE_TYPES_OUT["RegistrationDenied"])
         except:
             self.USER_REGISTRY[username] = password  # add user to registry
             self.send_message(
-                user, self.MESSAGE_TYPES_OUT["LoginSuccess"], None)
+                user, self.MESSAGE_TYPES_OUT["LoginSuccess"])
             user.last_seen = datetime.now()
             user.name = username
             user.logged_in = True
+            print(f"Registered user: {user.name}")
+
 
     def loginUser(self, user: User, username, password) -> None:
         try:
@@ -109,13 +114,14 @@ class Server:
         self.SOCKETS_LIST.append(client_socket)
         socket_list_index = len(self.SOCKETS_LIST) - 1
         user = self.createUserObject(
-            client_address[0], client_address[1], socket_list_index)
-        self.CLIENTS[socket_list_index] = user
+            client_socket, client_address[0], client_address[1], socket_list_index)
+        self.CLIENTS[client_socket] = user
         print('Accepted new connection from {}:{}'.format(
             *client_address))
-
+        print(message, message["header"])
         if message['header'] == self.MESSAGE_TYPES_IN["Register"]:
             username, password = message['data'].split('*')
+            print(f"Trying to register user: {username}") 
             t = threading.Thread(target=self.registerUser,
                                  args=[user, username, password])
             t.start()
@@ -128,12 +134,24 @@ class Server:
         return True, client_socket
 
     def search(self, user: User, msg_data: str):
-        self.SOCKET_LIST[user.socket_list_index].send()   # TODO
+        searched_users = msg_data.split('*')
+        searched_users_results = []
+        for su in searched_users:
+            if self.USER_REGISTRY.get(su, False):
+                for us_obj in self.CLIENTS.values():          
+                    if us_obj.name == su and us_obj.available:
+                        searched_users_results.append(f"{us_obj.client_ip} {us_obj.client_port}")
+                    elif us_obj.name == su and not us_obj.available:
+                        searched_users_results.append(f"{su} is busy")                    
+            else:
+                searched_users_results.append(f"{su} does not exist")
+        msg_data = "*".join(searched_users_results)
+        self.send_message(user, self.MESSAGE_TYPES_OUT["SearchResult"], msg_data)   # TODO
 
-    def remove_client(self, user: User):
-        self.SOCKET_LIST[user.socket_list_index].close()
-        self.SOCKETS_LIST.remove(user.socket_list_index)
-        del self.CLIENTS[user.socket_list_index]
+    def remove_client(self, client_socket: socket):
+        self.SOCKETS_LIST.remove(client_socket)
+        del self.CLIENTS[client_socket]
+        client_socket.close()
 
     def find_dead_clients(self, interval: int, max_wait: int):
         while True:
@@ -149,6 +167,12 @@ class Server:
         for notified_socket in read_sockets:
             if notified_socket == self.server_socket:
                 is_connected, client_ = self.establish_connection()  # TODO
+            
+            else:
+                message = self.receive_message(notified_socket)
+                print(f"Message type: {message['header']}, message content: {message['data']}")
+                if message['header'] == self.MESSAGE_TYPES_IN["Search"]:
+                    self.search(self.CLIENTS[notified_socket], message['data'])
 
         for notified_socket in exception_sockets:
             self.remove_client(self.CLIENTS[notified_socket])

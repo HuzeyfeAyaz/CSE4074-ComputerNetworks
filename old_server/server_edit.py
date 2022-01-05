@@ -116,11 +116,11 @@ class Server:
                                     args=[user, username, password])
             t.start()
 
-            # elif message['header'] == self.MESSAGE_TYPES_IN["Login"]:
-            #     username, password = message['data'].split('*')
-            #     t = threading.Thread(target=self.loginUser,
-            #                          args=[user, username, password])
-            #     t.start()
+        # elif message['header'] == self.MESSAGE_TYPES_IN["Login"]:
+        #     username, password = message['data'].split('*')
+        #     t = threading.Thread(target=self.loginUser,
+        #                          args=[user, username, password])
+        #     t.start()
 
             # t.join()
             # server_message = "SERVER".encode('utf-8')
