@@ -6,14 +6,14 @@ import time
 
 
 class User:
-    name = ""
+    name = None
+    contact_port = None
 
     def __init__(self, client_socket, client_ip, client_port, socket_list_index) -> None:
         self.client_socket = client_socket
         self.client_ip = client_ip
         self.client_port = client_port
         self.logged_in = False
-        self.available = False #TODO set when available 
         self.last_seen = datetime.now()
         self.socket_list_index = socket_list_index
 
@@ -72,7 +72,7 @@ class Server:
         user = User(client_socket, client_ip, client_port, client_socket_list_index)
         return user
 
-    def registerUser(self, user: User, username, password) -> None:
+    def registerUser(self, user: User, username, password, port:str) -> None:
         try:
             # if user doesn't exist throws an error
             _ = self.USER_REGISTRY[username]
@@ -86,10 +86,11 @@ class Server:
             user.last_seen = datetime.now()
             user.name = username
             user.logged_in = True
+            user.contact_port = port
             print(f"Registered user: {user.name}")
 
 
-    def loginUser(self, user: User, username, password) -> None:
+    def loginUser(self, user: User, username, password, port: str) -> None:
         try:
             # if user doesn't exist throws an error
             pw_of_user = self.USER_REGISTRY[username]
@@ -100,6 +101,7 @@ class Server:
                 user.last_seen = datetime.now()
                 user.name = username
                 user.logged_in = True
+                user.contact_port = port
         except:
             self.send_message(
                 user, self.MESSAGE_TYPES_OUT["LoginFailed"])
@@ -120,16 +122,16 @@ class Server:
             *client_address))
         print(message, message["header"])
         if message['header'] == self.MESSAGE_TYPES_IN["Register"]:
-            username, password = message['data'].split('*')
+            username, password, port = message['data'].split('*')
             print(f"Trying to register user: {username}") 
             t = threading.Thread(target=self.registerUser,
-                                 args=[user, username, password])
+                                 args=[user, username, password, port])
             t.start()
 
         elif message['header'] == self.MESSAGE_TYPES_IN["Login"]:
-            username, password = message['data'].split('*')
+            username, password, port = message['data'].split('*')
             t = threading.Thread(target=self.loginUser,
-                                 args=[user, username, password])
+                                 args=[user, username, password, port])
             t.start()
         return True, client_socket
 
@@ -139,10 +141,8 @@ class Server:
         for su in searched_users:
             if self.USER_REGISTRY.get(su, False):
                 for us_obj in self.CLIENTS.values():          
-                    if us_obj.name == su and us_obj.available:
-                        searched_users_results.append(f"{us_obj.client_ip} {us_obj.client_port}")
-                    elif us_obj.name == su and not us_obj.available:
-                        searched_users_results.append(f"{su} is busy")                    
+                    if us_obj.name == su and us_obj.logged_in:
+                        searched_users_results.append(f"{us_obj.client_ip} {us_obj.contact_port}")                 
             else:
                 searched_users_results.append(f"{su} does not exist")
         msg_data = "*".join(searched_users_results)
@@ -173,7 +173,9 @@ class Server:
                 print(f"Message type: {message['header']}, message content: {message['data']}")
                 if message['header'] == self.MESSAGE_TYPES_IN["Search"]:
                     self.search(self.CLIENTS[notified_socket], message['data'])
-
+                elif message['header'] == self.MESSAGE_TYPES_IN["Logout"]:
+                    self.remove_client(notified_socket)
+                
         for notified_socket in exception_sockets:
             self.remove_client(self.CLIENTS[notified_socket])
 
