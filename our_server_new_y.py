@@ -6,14 +6,14 @@ import time
 
 
 class User:
-    name = None
-    client_server_port = None
+    name = ""
 
     def __init__(self, client_socket, client_ip, client_port, socket_list_index) -> None:
         self.client_socket = client_socket
         self.client_ip = client_ip
         self.client_port = client_port
         self.logged_in = False
+        self.available = False #TODO set when available 
         self.last_seen = datetime.now()
         self.socket_list_index = socket_list_index
 
@@ -36,7 +36,7 @@ class Server:
         "RegistrationDenied": "1",
         "LoginFailed": "2",
         "LoginSuccess": "3",
-        "SearchResult": "4",
+        "SearchResult": "5",
     }
 
     def __init__(self) -> None:
@@ -69,11 +69,10 @@ class Server:
             return False
 
     def createUserObject(self, client_socket, client_ip, client_port, client_socket_list_index):
-        user = User(client_socket, client_ip,
-                    client_port, client_socket_list_index)
+        user = User(client_socket, client_ip, client_port, client_socket_list_index)
         return user
 
-    def registerUser(self, user: User, username, password, port) -> None:
+    def registerUser(self, user: User, username, password) -> None:
         try:
             # if user doesn't exist throws an error
             _ = self.USER_REGISTRY[username]
@@ -87,10 +86,10 @@ class Server:
             user.last_seen = datetime.now()
             user.name = username
             user.logged_in = True
-            user.client_server_port = port
             print(f"Registered user: {user.name}")
 
-    def loginUser(self, user: User, username, password, port) -> None:
+
+    def loginUser(self, user: User, username, password) -> None:
         try:
             # if user doesn't exist throws an error
             pw_of_user = self.USER_REGISTRY[username]
@@ -101,7 +100,6 @@ class Server:
                 user.last_seen = datetime.now()
                 user.name = username
                 user.logged_in = True
-                user.client_server_port = port
         except:
             self.send_message(
                 user, self.MESSAGE_TYPES_OUT["LoginFailed"])
@@ -122,16 +120,16 @@ class Server:
             *client_address))
         print(message, message["header"])
         if message['header'] == self.MESSAGE_TYPES_IN["Register"]:
-            username, password, port = message['data'].split('*')
-            print(f"Trying to register user: {username}")
+            username, password = message['data'].split('*')
+            print(f"Trying to register user: {username}") 
             t = threading.Thread(target=self.registerUser,
-                                 args=[user, username, password, port])
+                                 args=[user, username, password])
             t.start()
 
         elif message['header'] == self.MESSAGE_TYPES_IN["Login"]:
-            username, password, port = message['data'].split('*')
+            username, password = message['data'].split('*')
             t = threading.Thread(target=self.loginUser,
-                                 args=[user, username, password, port])
+                                 args=[user, username, password])
             t.start()
         return True, client_socket
 
@@ -140,17 +138,15 @@ class Server:
         searched_users_results = []
         for su in searched_users:
             if self.USER_REGISTRY.get(su, False):
-                for us_obj in self.CLIENTS.values():
-                    if us_obj.name == su and us_obj.logged_in:
-                        searched_users_results.append(
-                            f"{us_obj.client_ip} {us_obj.client_server_port}")
-                    elif us_obj.name == su and not us_obj.logged_in:
-                        searched_users_results.append(f"{su} is busy")
+                for us_obj in self.CLIENTS.values():          
+                    if us_obj.name == su and us_obj.available:
+                        searched_users_results.append(f"{us_obj.client_ip} {us_obj.client_port}")
+                    elif us_obj.name == su and not us_obj.available:
+                        searched_users_results.append(f"{su} is busy")                    
             else:
                 searched_users_results.append(f"{su} does not exist")
         msg_data = "*".join(searched_users_results)
-        self.send_message(
-            user, self.MESSAGE_TYPES_OUT["SearchResult"], msg_data)   # TODO
+        self.send_message(user, self.MESSAGE_TYPES_OUT["SearchResult"], msg_data)   # TODO
 
     def remove_client(self, client_socket: socket):
         self.SOCKETS_LIST.remove(client_socket)
@@ -171,11 +167,10 @@ class Server:
         for notified_socket in read_sockets:
             if notified_socket == self.server_socket:
                 is_connected, client_ = self.establish_connection()  # TODO
-
+            
             else:
                 message = self.receive_message(notified_socket)
-                print(
-                    f"Message type: {message['header']}, message content: {message['data']}")
+                print(f"Message type: {message['header']}, message content: {message['data']}")
                 if message['header'] == self.MESSAGE_TYPES_IN["Search"]:
                     self.search(self.CLIENTS[notified_socket], message['data'])
 
