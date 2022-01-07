@@ -7,7 +7,7 @@ import time
 
 class User:
     name = None
-    client_server_port = None
+    contact_port = None
 
     def __init__(self, client_socket, client_ip, client_port, socket_list_index) -> None:
         self.client_socket = client_socket
@@ -36,7 +36,7 @@ class Server:
         "RegistrationDenied": "1",
         "LoginFailed": "2",
         "LoginSuccess": "3",
-        "SearchResult": "4",
+        "SearchResult": "5",
     }
 
     def __init__(self) -> None:
@@ -73,7 +73,7 @@ class Server:
                     client_port, client_socket_list_index)
         return user
 
-    def registerUser(self, user: User, username, password, port) -> None:
+    def registerUser(self, user: User, username, password, port: str) -> None:
         try:
             # if user doesn't exist throws an error
             _ = self.USER_REGISTRY[username]
@@ -87,10 +87,10 @@ class Server:
             user.last_seen = datetime.now()
             user.name = username
             user.logged_in = True
-            user.client_server_port = port
+            user.contact_port = port
             print(f"Registered user: {user.name}")
 
-    def loginUser(self, user: User, username, password, port) -> None:
+    def loginUser(self, user: User, username, password, port: str) -> None:
         try:
             # if user doesn't exist throws an error
             pw_of_user = self.USER_REGISTRY[username]
@@ -101,7 +101,7 @@ class Server:
                 user.last_seen = datetime.now()
                 user.name = username
                 user.logged_in = True
-                user.client_server_port = port
+                user.contact_port = port
         except:
             self.send_message(
                 user, self.MESSAGE_TYPES_OUT["LoginFailed"])
@@ -143,9 +143,7 @@ class Server:
                 for us_obj in self.CLIENTS.values():
                     if us_obj.name == su and us_obj.logged_in:
                         searched_users_results.append(
-                            f"{us_obj.client_ip} {us_obj.client_server_port}")
-                    elif us_obj.name == su and not us_obj.logged_in:
-                        searched_users_results.append(f"{su} is busy")
+                            f"{su} {us_obj.client_ip} {us_obj.contact_port}")
             else:
                 searched_users_results.append(f"{su} does not exist")
         msg_data = "*".join(searched_users_results)
@@ -178,6 +176,8 @@ class Server:
                     f"Message type: {message['header']}, message content: {message['data']}")
                 if message['header'] == self.MESSAGE_TYPES_IN["Search"]:
                     self.search(self.CLIENTS[notified_socket], message['data'])
+                elif message['header'] == self.MESSAGE_TYPES_IN["Logout"]:
+                    self.remove_client(notified_socket)
 
         for notified_socket in exception_sockets:
             self.remove_client(self.CLIENTS[notified_socket])
