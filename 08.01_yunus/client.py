@@ -1,0 +1,276 @@
+import select
+import socket
+import errno
+import sys
+import threading
+import time
+
+
+class PeerUser:
+    def __init__(self, ip, port, p_socket, socket_list_index, username):
+        self.ip = ip
+        self.port = port
+        self.p_socket = p_socket
+        self.socket_list_index = socket_list_index
+        self.username = username
+
+
+class Client:
+    HEADER_LENGTH = 10
+    SERVER_IP = "127.0.0.1"
+    SERVER_PORT = 1234
+    SOCKETS_LIST = []  # 0 = server, 1 = client_server
+    PEERS = {}  # key = socket, value = PeerUser
+    MESSAGE_TYPES_OUT = {
+        "Register": "1",    # to server
+        "Login": "2",       # to server
+        "Search": "3",      # to server
+        "KeepAlive": "4",   # to server
+        "Logout": "5",      # to server
+        "Message": "6",     # to other client
+        "ChatRequest": "7",  # to other client
+        "ChatAccept": "8",  # to other client
+        "ChatReject": "9",  # to other client
+    }
+    MESSAGE_TYPES_IN = {
+        "RegistrationDenied": "1",  # from server
+        "LoginFailed": "2",         # from server
+        "LoginSuccess": "3",        # from server
+        "SearchResult": "5",        # from server
+        "Message": "6",             # from other client
+        "ChatRequest": "7",         # from other client
+        "ChatAccept": "8",          # from other client
+        "ChatReject": "9",          # from other client
+    }
+    client_server_socket = None
+    username = None
+    password = None
+    available = True    # status is user is currently chatting
+    peers_waiting_for_chat_accept = []  # peer socket objects waiting for answer
+    registered_users = []
+
+    # -------------------------<< region INIT START >>-------------------------
+    def __init__(self):
+        self.MY_PORT = str(
+            10000 + int(input("Please enter your port number (0-9): ")))
+        self.establish_connection("Server", self.SERVER_IP, self.SERVER_PORT)
+
+    def build_client_server(self):
+        self.client_server_socket = socket.socket(
+            socket.AF_INET, socket.SOCK_STREAM)
+        self.client_server_socket.setsockopt(
+            socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.client_server_socket.bind((self.SERVER_IP, int(self.MY_PORT)))
+        self.client_server_socket.listen()
+        self.SOCKETS_LIST.append(self.client_server_socket)
+        print(
+            f'Listening for connections on {self.SERVER_IP}:{self.MY_PORT}...')
+    # -------------------------<< region INIT END >>-------------------------
+
+    # -------------------------<< region MessageIO START >>-------------------------
+    def send_message(self, user: PeerUser, msg_data_header: str, msg_data_string=""):
+        message_string = f"{msg_data_header + msg_data_string}".encode("utf-8")
+        message_header = f"{len(message_string):<{self.HEADER_LENGTH}}".encode(
+            'utf-8')
+        self.SOCKETS_LIST[user.socket_list_index].send(
+            message_header + message_string)
+
+    def receive_message(self, client_socket):
+        try:
+            message_header = client_socket.recv(self.HEADER_LENGTH)
+            if not len(message_header):
+                return False
+            message_length = int(message_header.decode('utf-8').strip())
+            message = client_socket.recv(message_length).decode('utf-8')
+            return {'header': message[0], 'data': message[1:]}
+        except:
+            return False
+    # -------------------------<< region MessageIO END >>-------------------------
+
+    # -------------------------<< region EstablishConnection START >>-------------------------
+    def establish_peer_connection(self):
+        peer_socket, peer_address = self.client_server_socket.accept()
+        print('Accepted new connection from {}:{}'.format(*peer_address))
+        self.SOCKETS_LIST.append(peer_socket)
+        socket_list_index = len(self.SOCKETS_LIST) - 1
+        peer_user = PeerUser(
+            peer_address[0], peer_address[1], peer_socket, socket_list_index, "")
+        self.PEERS[peer_socket] = peer_user
+        return True, peer_socket
+
+    def establish_connection(self, Name, IP, PORT):
+        client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        client_socket.connect((IP, int(PORT)))
+        client_socket.setblocking(False)
+        self.SOCKETS_LIST.append(client_socket)
+        self.PEERS[client_socket] = PeerUser(
+            IP, PORT, client_socket, len(self.SOCKETS_LIST)-1, Name)
+    # -------------------------<< region EstablishConnection END >>-------------------------
+
+    # -------------------------<< region SendToServer START >>-------------------------
+    def login(self) -> bool:
+        username, password = self.ask_for_credentials()
+        # TODO
+
+    def register(self) -> bool:
+        username, password = self.ask_for_credentials()
+        msg_data = username + "*" + password + "*" + self.MY_PORT
+        self.send_message(
+            self.PEERS[self.SOCKETS_LIST[0]], self.MESSAGE_TYPES_OUT["Register"], msg_data)
+
+        self.SOCKETS_LIST[0].setblocking(1)
+        answer = self.receive_message(self.SOCKETS_LIST[0])
+        self.SOCKETS_LIST[0].setblocking(False)
+
+        if answer:
+            print(f"Message type = {answer['header']}")
+            self.username, self.password = username, password
+            return True
+
+    def search(self, users: list):
+        msg_data = '*'.join(users)
+        self.send_message(
+            self.PEERS[self.SOCKETS_LIST[0]], self.MESSAGE_TYPES_OUT["Search"], msg_data)
+    # -------------------------<< region SendToServer END >>-------------------------
+
+    # -------------------------<< region SendToClient START >>-------------------------
+    def send_chat_request(self):
+        request_message = self.username
+        if len(self.registered_users) == 1:  # peer to peer chat
+            self.establish_connection(
+                self.registered_users[0][0], self.registered_users[0][1], self.registered_users[0][2])
+            for peer in self.PEERS.values():
+                if peer.username == self.registered_users[0][0]:
+                    self.send_message(
+                        peer, self.MESSAGE_TYPES_OUT["ChatRequest"], request_message)
+
+        else:  # group chat TODO
+            # for user in registered_users:
+            pass
+
+    def send_chat_accept(self):
+        for peer_socket in self.peers_waiting_for_chat_accept:
+            self.send_message(
+                self.PEERS[peer_socket], self.MESSAGE_TYPES_OUT["ChatAccept"])
+
+    def send_chat_reject(self):
+        for peer_socket in self.peers_waiting_for_chat_accept:
+            self.send_message(
+                self.PEERS[peer_socket], self.MESSAGE_TYPES_OUT["ChatReject"])
+
+    def send_busy(self):
+        for peer_socket in self.peers_waiting_for_chat_accept:
+            self.send_message(
+                self.PEERS[peer_socket], self.MESSAGE_TYPES_OUT["ChatReject"], "I am already in a chat!")
+
+    def send_chat_message(self, my_input: str):
+        for peer in self.PEERS.values():
+            self.send_message(
+                peer, self.MESSAGE_TYPES_OUT["Message"], my_input)
+    # -------------------------<< region SendToClient END >>-------------------------
+
+    def ask_for_credentials(self):
+        _username = input("Username: ")
+        _password = input("Password: ")
+        return _username, _password
+
+    def logout(self):
+        for peer in self.PEERS.values():
+            self.send_message(peer, self.MESSAGE_TYPES_OUT["Logout"])
+
+    def peer_logout(self):
+        pass
+
+    # -------------------------<< region CheckForMessages START >>-------------------------
+    def check_for_messages(self):
+        while True:
+            read_sockets, _, exception_sockets = select.select(
+                self.SOCKETS_LIST, [], self.SOCKETS_LIST)
+            for notified_socket in read_sockets:
+                if notified_socket == self.client_server_socket:
+                    is_connected, client_ = self.establish_peer_connection()  # TODO
+
+                else:
+                    message = self.receive_message(notified_socket)
+                    if message != False:
+                        if message['header'] == self.MESSAGE_TYPES_IN["SearchResult"]:
+                            user_stats = message['data'].split(
+                                '*')  # [ip port]
+                            for ix, user_stat in enumerate(user_stats):
+                                if user_stat.endswith("exist"):
+                                    print(user_stat)
+                                else:
+                                    user_datail = user_stat.split(
+                                        ' ')  # [[username, ip, port]]
+                                    self.registered_users.append(
+                                        [user_datail[0], user_datail[1], user_datail[2]])
+                                    print(
+                                        f"{user_datail[0]} is available at destination: {user_datail[1] + ':' + user_datail[2]}")
+                                    self.send_chat_request()
+                        elif message['header'] == self.MESSAGE_TYPES_IN["Message"]:
+                            print(
+                                f"-->{self.PEERS[notified_socket].username} > {message['data']}")
+
+                        # the other client sent a request
+                        elif message['header'] == self.MESSAGE_TYPES_IN["ChatRequest"]:
+                            username = message["data"]
+                            self.PEERS[notified_socket].username = username
+                            self.peers_waiting_for_chat_accept.append(
+                                notified_socket)
+                            print(
+                                f"{self.PEERS[notified_socket].username} sent a chat request")
+
+                        # the other client accepted the chat request
+                        elif message['header'] == self.MESSAGE_TYPES_IN["ChatAccept"]:
+                            self.available = False
+                            self.peers_waiting_for_chat_accept = []
+                            print(
+                                f"{self.PEERS[notified_socket].username} accepted the chat request")
+
+                        elif message['header'] == self.MESSAGE_TYPES_IN["ChatReject"]:
+                            print(
+                                f"{self.PEERS[notified_socket].username} > {message['data']}")
+
+            for notified_socket in exception_sockets:
+                self.remove_client(self.CLIENTS[notified_socket])
+    # -------------------------<< region CheckForMessages END >>-------------------------
+
+    # -------------------------<< region MAIN START >>-------------------------
+    def main_process(self):
+        logged_in = False
+        quit_process = False
+        while not logged_in:
+            l_or_r = input("Do you wanna login (L) or register (R)?: ")
+            if l_or_r.lower() == "l":
+                logged_in = self.login()
+            elif l_or_r.lower() == "r":
+                logged_in = self.register()
+
+        self.build_client_server()
+        msg_checker_thread = threading.Thread(target=self.check_for_messages)
+        msg_checker_thread.start()
+
+        while not quit_process:
+            my_input = input(f'{self.username} > ')
+            if (my_input.lower() == "quit") or (my_input.lower() == "logout"):
+                quit_process = True
+                self.logout()
+                break
+            elif my_input.startswith("message"):
+                users = my_input.strip().split(' ')[1:]
+                self.search(users)
+
+            if my_input == ("ok") and self.available:
+                self.available = False
+                self.send_chat_accept()
+            elif my_input.startswith("reject"):
+                self.send_chat_reject()
+
+            if not self.available:
+                self.send_chat_message(my_input)
+    # -------------------------<< region MAIN END >>-------------------------
+
+
+if __name__ == '__main__':
+    client = Client()
+    client.main_process()
