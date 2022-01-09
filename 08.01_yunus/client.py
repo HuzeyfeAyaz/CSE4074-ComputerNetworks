@@ -26,7 +26,7 @@ class Client:
         "Login": "2",       # to server
         "Search": "3",      # to server
         "KeepAlive": "4",   # to server
-        "Logout": "5",      # to server
+        "Logout": "0",      # to server
         "Message": "6",     # to other client
         "ChatRequest": "7",  # to other client
         "ChatAccept": "8",  # to other client
@@ -41,6 +41,8 @@ class Client:
         "ChatRequest": "7",         # from other client
         "ChatAccept": "8",          # from other client
         "ChatReject": "9",          # from other client
+        "Logout": "0",      # to server
+
     }
     MY_PORT = None
     client_server_socket = None
@@ -69,7 +71,7 @@ class Client:
     def send_message(self, user: PeerUser, msg_data_header: str, msg_data_string=""):
         message_string = f"{msg_data_header + msg_data_string}".encode("utf-8")
         message_header = f"{len(message_string):<{self.HEADER_LENGTH}}".encode('utf-8')
-        self.SOCKETS_LIST[user.socket_list_index].send(message_header + message_string)
+        user.p_socket.send(message_header + message_string)
 
     def receive_message(self, client_socket):
         try:
@@ -123,6 +125,8 @@ class Client:
     def search(self, users: list):
         msg_data = '*'.join(users)
         self.send_message(self.PEERS[self.SOCKETS_LIST[0]], self.MESSAGE_TYPES_OUT["Search"], msg_data)
+
+    
     # -------------------------<< region SendToServer END >>-------------------------
 
     # -------------------------<< region SendToClient START >>-------------------------
@@ -146,9 +150,10 @@ class Client:
     def send_chat_reject(self):
         for peer_socket in self.peers_waiting_for_chat_accept:
             self.send_message(self.PEERS[peer_socket], self.MESSAGE_TYPES_OUT["ChatReject"], "rejected the chat request")
-            del self.PEERS[peer_socket]
-            peer_socket.close()
-            self.SOCKETS_LIST.remove(peer_socket)
+            
+            self.remove_peer(peer_socket)
+        self.available = True
+
         self.peers_waiting_for_chat_accept = []   
 
     def send_busy(self):
@@ -161,16 +166,14 @@ class Client:
                 self.send_message(peer, self.MESSAGE_TYPES_OUT["Message"], my_input)
             
     def logout(self):
-        # try:
-        for peer in self.PEERS.values():
-            if peer.username == self.username:continue
-            self.send_message(peer, self.MESSAGE_TYPES_OUT["Logout"], "peer logged out")
-                # del self.PEERS[peer.p_socket]
-                # self.PEERS.pop(peer.p_socket)
-                # self.SOCKETS_LIST.remove(peer.p_socket)
-            peer.p_socket.close()
-        # except:
-        #     pass
+        self.SOCKETS_LIST[1].close()
+        self.SOCKETS_LIST.pop(1)
+        server_socket_obj = self.PEERS[self.SOCKETS_LIST[0]]      
+        for soc in self.SOCKETS_LIST:
+            self.send_message(self.PEERS[soc],self.MESSAGE_TYPES_OUT["Logout"])         
+            soc.close()
+        self.SOCKETS_LIST = [server_socket_obj.p_socket]
+        self.PEERS = {server_socket_obj.p_socket: server_socket_obj,}
     # -------------------------<< region SendToClient END >>-------------------------
     
     # -------------------------<< region Utils START >>-------------------------
@@ -180,10 +183,13 @@ class Client:
         return _username, _password
 
     def remove_peer(self, peer_socket):
+        self.SOCKETS_LIST.remove(peer_socket)
         del self.PEERS[peer_socket]
-
-        self.peers_waiting_for_chat_accept.remove(peer_socket)
-        
+        try:
+            self.peers_waiting_for_chat_accept.remove(peer_socket)
+        except:
+            pass
+        peer_socket.shutdown(socket.SHUT_RDWR)
         peer_socket.close()
     # -------------------------<< region Utils END >>-------------------------
 
@@ -203,7 +209,7 @@ class Client:
                             if message['header'] == self.MESSAGE_TYPES_IN["SearchResult"]:
                                 user_stats = message['data'].split('*')  # [ip port]
                                 for ix, user_stat in enumerate(user_stats):
-                                    if user_stat.endswith("exist"):
+                                    if user_stat.endswith("exist") or user_stat.endswith("offline") :
                                         print(user_stat)
                                     else:
                                         user_datail = user_stat.split(' ')  # [[username, ip, port]]
@@ -230,10 +236,21 @@ class Client:
                             elif message['header'] == self.MESSAGE_TYPES_IN["ChatReject"]:
                                 print(f"{self.PEERS[notified_socket].username} {message['data']}")
                                 self.remove_peer(notified_socket)
+                                self.available = True
+                                # self.SOCKETS_LIST.remove(notified_socket)
+                            elif message['header'] == self.MESSAGE_TYPES_IN["Logout"]:
+                                print(f"{self.PEERS[notified_socket].username} logged out")
+                                # TODO
+                                self.remove_peer(notified_socket)
+                                self.available = True
+                                # self.SOCKETS_LIST.remove(notified_socket)
+
+                                
                         else:
                             print('Closed connection from: {}'.format(self.PEERS[notified_socket].username))
 
                             self.remove_peer(notified_socket)
+                            self.available = True
 
                     continue
 
@@ -247,12 +264,12 @@ class Client:
                 # If we got different error code - something happened
                 if e.errno != errno.EAGAIN and e.errno != errno.EWOULDBLOCK:
                     print('Reading error: {}'.format(str(e)))
-                    # sys.exit()
+                    sys.exit()
 
             except Exception as e:
                 # Any other exception - something happened, exit
                 print('Reading error: {}'.format(str(e)))
-                # sys.exit()
+                sys.exit()
     # -------------------------<< region CheckForMessages END >>-------------------------
 
     # -------------------------<< region MAIN START >>-------------------------
@@ -282,8 +299,7 @@ class Client:
             if (my_input.lower() == "quit") or (my_input.lower() == "logout"):
                 self.quit_process = True
                 self.logout()
-                exit(0)
-                break
+                sys.exit(0)
             elif my_input.startswith("message"):
                 users = my_input.strip().split(' ')[1:]
                 self.search(users)
@@ -293,6 +309,7 @@ class Client:
                     self.available = False
                     self.send_chat_accept()
                 elif my_input.startswith("reject"):
+                    self.available = True
                     self.send_chat_reject()
             elif not self.available:
                 self.send_chat_message(my_input)

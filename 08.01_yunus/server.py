@@ -30,7 +30,7 @@ class Server:
         "Login": "2",
         "Search": "3",
         "KeepAlive": "4",
-        "Logout": "5",
+        "Logout": "0",
     }
     MESSAGE_TYPES_OUT = {
         "RegistrationDenied": "1",
@@ -52,8 +52,8 @@ class Server:
         message_string = f"{msg_data_header + msg_data_string}".encode("utf-8")
         message_header = f"{len(message_string):<{self.HEADER_LENGTH}}".encode(
             'utf-8')
-        self.SOCKETS_LIST[user.socket_list_index].send(
-            message_header + message_string)
+        user.client_socket.send(message_header + message_string)
+        print(f"{msg_data_header + ' - ' + msg_data_string}")
 
     def receive_message(self, client_socket):
         try:
@@ -140,10 +140,13 @@ class Server:
         searched_users_results = []
         for su in searched_users:
             if self.USER_REGISTRY.get(su, False):
+                found = False
                 for us_obj in self.CLIENTS.values():
                     if us_obj.name == su and us_obj.logged_in:
-                        searched_users_results.append(
-                            f"{us_obj.name} {us_obj.client_ip} {us_obj.contact_port}")
+                        searched_users_results.append(f"{us_obj.name} {us_obj.client_ip} {us_obj.contact_port}")
+                        found = True
+                if not found:
+                    searched_users_results.append(f"{su} is offline")
             else:
                 searched_users_results.append(f"{su} does not exist")
         msg_data = "*".join(searched_users_results)
