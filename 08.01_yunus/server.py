@@ -179,8 +179,8 @@ class Server:
                 elif message['header'] == self.MESSAGE_TYPES_IN["Logout"]:
                     self.remove_client(notified_socket)
 
-        for notified_socket in exception_sockets:
-            self.remove_client(self.CLIENTS[notified_socket])
+        # for notified_socket in exception_sockets:
+        #     self.remove_client(self.CLIENTS[notified_socket])
 
 
 if __name__ == '__main__':

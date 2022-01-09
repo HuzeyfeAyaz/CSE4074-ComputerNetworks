@@ -21,6 +21,8 @@ class Client:
     SOCKETS_LIST = []  # 0 = server, 1 = client_server
     PEERS = {}  # key = socket, value = PeerUser
     SEARCH_RESULT = {}  # key username, value [ip, address]
+    PEER_CLIENT = False
+    PEER_SERVER = False
     MESSAGE_TYPES_OUT = {
         "Register": "1",
         "Login": "2",
@@ -29,16 +31,20 @@ class Client:
         "Logout": "5",
         "Message": "6",
         "ChatRequest": "7",
+        "ChatAccept": "8",
+        "ChatReject": "9",
+
+
     }
     MESSAGE_TYPES_IN = {
         "RegistrationDenied": "1",
         "LoginFailed": "2",
         "LoginSuccess": "3",
-        "MessageIn": "4",
         "SearchResult": "5",
-        "RequestAccept": "6",
+        "Message": "6",
         "ChatRequest": "7",
-        "RequestReject": "8",
+        "ChatAccept": "8",
+        "ChatReject": "9",
 
     }
     client_server_socket = None
@@ -59,6 +65,11 @@ class Client:
         self.client_server_socket.bind((self.SERVER_IP, int(self.MY_PORT)))
         self.client_server_socket.listen()
         self.SOCKETS_LIST.append(self.client_server_socket)
+        self.PEERS[self.client_server_socket] = PeerUser(self.SERVER_IP, 
+                                                        int(self.MY_PORT), 
+                                                        self.client_server_socket, 
+                                                        len(self.SOCKETS_LIST)-1,
+                                                        "ClientServer")
         print(
             f'Listening for connections on {self.SERVER_IP}:{self.MY_PORT}...')
 
@@ -66,7 +77,7 @@ class Client:
         message_string = f"{msg_data_header + msg_data_string}".encode("utf-8")
         message_header = f"{len(message_string):<{self.HEADER_LENGTH}}".encode(
             'utf-8')
-        self.SOCKETS_LIST[user.sockets_list_index].send(
+        user.p_socket.send(
             message_header + message_string)
 
     def receive_message(self, client_socket):
@@ -87,6 +98,7 @@ class Client:
         self.SOCKETS_LIST.append(peer_socket)
         self.PEERS[peer_socket] = PeerUser(
             IP, PORT, peer_socket, len(self.SOCKETS_LIST)-1, name)
+        self.PEER_SERVER = peer_socket
         return True, peer_socket
 
     def establish_peer_connection(self):
@@ -104,7 +116,11 @@ class Client:
 
         print('Accepted new connection from {}:{}'.format(
             *peer_address))
-        # print(message, message["header"])
+        print( message["data"])
+        self.PEER_CLIENT = peer_socket
+        splitted =  message["data"].split(' ')
+        name, ip, port = splitted[0], splitted[-2], splitted[-1]
+        is_con, peer_server = self.create_peer_connection("PeerServer", ip, port)
 
         return True, peer_socket
 
@@ -115,6 +131,7 @@ class Client:
         self.SOCKETS_LIST.append(client_socket)
         self.PEERS[client_socket] = PeerUser(
             IP, PORT, client_socket, len(self.SOCKETS_LIST)-1, Name)
+        # self.PEER_SOCKET = client_socket
 
     def ask_for_credentials(self):
         _username = input("Username: ")
@@ -159,9 +176,20 @@ class Client:
         #         print(f"{users[ix]} is available at destination: {':'.join(user_stat.split(' '))}")
 
         # return answer
+    def send_chat_accept(self):
+        accept_message = f"{self.username} accepted the chat request."
+        self.send_message(self.PEERS[self.PEER_SERVER], self.MESSAGE_TYPES_OUT["ChatAccept"],accept_message)
+        
+    def send_chat_reject(self):
+        reject_message = f"{self.username} rejected the chat request."
+        self.send_message(self.PEERS[self.SOCKETS_LIST[-1]], self.MESSAGE_TYPES_OUT["ChatReject"],reject_message)
+        del self.PEERS[self.SOCKETS_LIST[-1]]
+        self.SOCKETS_LIST[-1].close()
+        self.SOCKETS_LIST.pop()
+        
 
     def send_chat_request(self, users: list):
-        request_message = f"{self.username} sent a chat request"
+        request_message = f"{self.username} sent a chat request {self.SERVER_IP} {self.MY_PORT}"
         is_connected, peer_socket = self.create_peer_connection(users[0],
                                                                 self.SEARCH_RESULT[users[0]][0],
                                                                 self.SEARCH_RESULT[users[0]][1])
@@ -174,7 +202,7 @@ class Client:
             if len(splitted) == 3:
                 print(
                     f"User {splitted[0]} available at address {splitted[1]}:{splitted[2]}")
-                client_socket = socket.socket()
+                # client_socket = socket.socket()
                 self.SEARCH_RESULT[splitted[0]] = [splitted[1], splitted[2]]
             else:
                 print(line)
@@ -187,8 +215,8 @@ class Client:
                 for notified_socket in read_sockets:
                     if notified_socket == self.client_server_socket:
                         is_connected, client_ = self.establish_peer_connection()  # TODO
-                        message = self.receive_message(notified_socket)
-                        print(message["data"])
+                        # message = self.receive_message(client_)
+                        # print(message["data"])
                     else:
                         message = self.receive_message(notified_socket)
                         # print(f"Message type: {message['header']}, message content: {message['data']}")
@@ -198,17 +226,23 @@ class Client:
                         elif message['header'] == self.MESSAGE_TYPES_IN["Logout"]:
                             # self.remove_client(notified_socket)
                             pass
-                        elif message['header'] == self.MESSAGE_TYPES_IN["RequestAccept"]:
 
-                            pass
-                        elif message['header'] == self.MESSAGE_TYPES_IN["RequestReject"]:
-                            pass
-                        elif message['header'] == self.MESSAGE_TYPES_IN["MessageIn"]:
+                        elif message['header'] == self.MESSAGE_TYPES_IN["Message"]:
                             print(
                                 f"{self.PEERS[notified_socket].username} > {message['data']}")
-                        elif message['header'] == self.MESSAGE_TYPES_IN["ChatRequest"]:
+                        # elif message['header'] == self.MESSAGE_TYPES_IN["ChatRequest"]:
+                        #     splitted = message['data'].split(' ')
+                        #     username, ip, port = splitted[1], splitted[-2], splitted[-1]
+                        #     self.establish_connection(username,ip,port)
+                        #     print(message["data"])
+                            # pass
+                        elif message['header'] == self.MESSAGE_TYPES_IN["ChatAccept"]:
                             print(message["data"])
                             pass
+                        elif message['header'] == self.MESSAGE_TYPES_IN["ChatReject"]:
+                            print(message["data"])
+                            pass
+                        
 
                 for notified_socket in exception_sockets:
                     self.remove_client(self.CLIENTS[notified_socket])
@@ -239,15 +273,17 @@ class Client:
                 self.search(users)
 
             elif my_input.startswith("chat_req"):
-                print("chat request!!!!")
+                # print("chat request!!!!")
                 peer_to_req = my_input.strip().split(' ')[1:]
                 self.send_chat_request(peer_to_req)
-                print("chat req don!!!")
-
-            elif len(self.PEERS) > 2:
-                for peer in self.PEERS:
-                    self.send_message(
-                        peer, self.MESSAGE_TYPES_OUT["Message"], my_input)
+                # print("chat req don!!!")
+            elif my_input == ("ok"):
+                self.send_chat_accept()
+            elif my_input.startswith("reject"):
+                self.send_chat_reject()
+            elif self.PEER_SERVER and self.PEER_CLIENT:
+                # for peer in self.PEERS:
+                self.send_message(self.PEERS[self.PEER_SERVER], self.MESSAGE_TYPES_OUT["Message"], my_input)
 
             # self.check_for_messages()
 
