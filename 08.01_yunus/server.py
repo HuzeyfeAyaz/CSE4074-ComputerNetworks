@@ -3,6 +3,9 @@ import select
 from datetime import datetime
 import threading
 import time
+import asyncio
+import errno
+import sys
 
 
 class User:
@@ -21,7 +24,8 @@ class User:
 class Server:
     HEADER_LENGTH = 10
     IP = "127.0.0.1"
-    PORT = 1234
+    PORT = 9000
+    UDP_PORT = 9001
     CLIENTS = {}  # key = socket, val = User object
     SOCKETS_LIST = []
     USER_REGISTRY = {}  # key = username, value = password
@@ -47,6 +51,10 @@ class Server:
         self.server_socket.listen()
         self.SOCKETS_LIST.append(self.server_socket)
         print(f'Listening for connections on {self.IP}:{self.PORT}...')
+        
+        self.server_udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.server_udp_socket.bind((self.IP, self.UDP_PORT))
+        print(f'Checking for keep alive signals on {self.IP}:{self.UDP_PORT}...')
 
     def send_message(self, user: User, msg_data_header: str, msg_data_string=''):
         message_string = f"{msg_data_header + msg_data_string}".encode("utf-8")
@@ -158,38 +166,75 @@ class Server:
         del self.CLIENTS[client_socket]
         client_socket.close()
 
+    def update_last_seen(self, username):
+        for client in self.CLIENTS.values():
+            if username == client.name:
+                client.last_seen = datetime.now()
+    
+    def check_for_keep_alive(self):
+        while True:
+            data, _addr = self.server_udp_socket.recvfrom(1024)
+            data = data.decode("utf-8")
+            print(data)
+            updater_thread = threading.Thread(target=self.update_last_seen, args=[data])
+            updater_thread.start()
+    
     def find_dead_clients(self, interval: int, max_wait: int):
         while True:
             current_time = datetime.now()
-            for client in self.CLIENTS:
-                if (current_time - client.last_seen).total_seconds > max_wait:
-                    self.remove_client(client)
+            found = False
+            for client in self.CLIENTS.copy().values():
+                if (current_time - client.last_seen).seconds > max_wait:
+                    self.remove_client(client.client_socket)
+                    found = True
+            if found:
+                print("Removed dead client")
+            else:
+                print("No dead clients found")
+            
             time.sleep(interval)
 
     def check_for_messages(self):
-        read_sockets, _, exception_sockets = select.select(
-            self.SOCKETS_LIST, [], self.SOCKETS_LIST)
-        for notified_socket in read_sockets:
-            if notified_socket == self.server_socket:
-                is_connected, client_ = self.establish_connection()  # TODO
+        try: 
+            read_sockets, _, exception_sockets = select.select(
+                self.SOCKETS_LIST, [], self.SOCKETS_LIST)
+            for notified_socket in read_sockets:
+                if notified_socket == self.server_socket:
+                    is_connected, client_ = self.establish_connection()  # TODO
 
-            else:
-                message = self.receive_message(notified_socket)
-                print(
-                    f"Message type: {message['header']}, message content: {message['data']}")
-                if message['header'] == self.MESSAGE_TYPES_IN["Search"]:
-                    self.search(self.CLIENTS[notified_socket], message['data'])
-                elif message['header'] == self.MESSAGE_TYPES_IN["Logout"]:
-                    self.remove_client(notified_socket)
+                else:
+                    message = self.receive_message(notified_socket)
+                    print(
+                        f"Message type: {message['header']}, message content: {message['data']}")
+                    if message['header'] == self.MESSAGE_TYPES_IN["Search"]:
+                        self.search(self.CLIENTS[notified_socket], message['data'])
+                    elif message['header'] == self.MESSAGE_TYPES_IN["Logout"]:
+                        self.remove_client(notified_socket)
 
-        # for notified_socket in exception_sockets:
-        #     self.remove_client(self.CLIENTS[notified_socket])
+            for notified_socket in exception_sockets:
+                self.remove_client(notified_socket)
+                
+        except IOError as e:
+                # This is normal on non blocking connections - when there are no incoming data error is going to be raised
+                # Some operating systems will indicate that using AGAIN, and some using WOULDBLOCK error code
+                # We are going to check for both - if one of them - that's expected, means no incoming data, continue as normal
+                # If we got different error code - something happened
+                if e.errno != errno.EAGAIN and e.errno != errno.EWOULDBLOCK:
+                    print('Reading error: {}'.format(str(e)))
+                    sys.exit()
+
+        except Exception as e:
+            # Any other exception - something happened, exit
+            print('Reading error: {}'.format(str(e)))
+            sys.exit()
+            
 
 
 if __name__ == '__main__':
     server = Server()
-    # find_dead_client_thread = threading.Thread(
-    #     target=server.find_dead_clients, args=[30, 200])
-    # find_dead_client_thread.start()
+    find_dead_client_thread = threading.Thread(target=server.find_dead_clients, args=[5, 10])
+    find_dead_client_thread.start()
+    keep_alive_checker_thread = threading.Thread(target=server.check_for_keep_alive)
+    keep_alive_checker_thread.start()
     while True:
         server.check_for_messages()

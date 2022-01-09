@@ -1,9 +1,11 @@
+import asyncio
 import select
 import socket
 import errno
 import sys
 import threading
 import time
+import asyncio
 
 
 class PeerUser:
@@ -18,7 +20,8 @@ class PeerUser:
 class Client:
     HEADER_LENGTH = 10
     SERVER_IP = "127.0.0.1"
-    SERVER_PORT = 1234
+    SERVER_PORT = 9000
+    SERVER_UDP_PORT = 9001
     SOCKETS_LIST = []  # 0 = server, 1 = client_server
     PEERS = {}  # key = socket, value = PeerUser
     MESSAGE_TYPES_OUT = {
@@ -50,10 +53,12 @@ class Client:
     available = True    # status is user is currently chatting
     peers_waiting_for_chat_accept = []  # peer socket objects waiting for answer
     registered_users = []
+    quit_process = False
 
     # -------------------------<< region INIT START >>-------------------------
     def __init__(self):
         self.establish_connection("Server", self.SERVER_IP, self.SERVER_PORT)
+        self.server_udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
     def build_client_server(self):
         self.client_server_socket = socket.socket(
@@ -125,7 +130,13 @@ class Client:
         msg_data = '*'.join(users)
         self.send_message(self.PEERS[self.SOCKETS_LIST[0]], self.MESSAGE_TYPES_OUT["Search"], msg_data)
 
-    
+    def send_keep_alive(self):
+        while not self.quit_process:
+            time.sleep(5)
+            data = self.username.encode("utf-8")
+            self.server_udp_socket.sendto(data, (self.SERVER_IP, self.SERVER_UDP_PORT))
+            print("Sending keep alive to server !")
+
     # -------------------------<< region SendToServer END >>-------------------------
 
     # -------------------------<< region SendToClient START >>-------------------------
@@ -282,7 +293,6 @@ class Client:
                 continue
 
         logged_in = False
-        self.quit_process = False
         while not logged_in:
             l_or_r = input("Do you wanna login (L) or register (R)?: ")
             if l_or_r.lower() == "l":
@@ -293,7 +303,8 @@ class Client:
         self.build_client_server()
         msg_checker_thread = threading.Thread(target=self.check_for_messages)
         msg_checker_thread.start()
-
+        keep_alive_thread = threading.Thread(target=self.send_keep_alive)
+        keep_alive_thread.start()
         while not self.quit_process:
             my_input = input(f'{self.username} > ')
             if (my_input.lower() == "quit") or (my_input.lower() == "logout"):
