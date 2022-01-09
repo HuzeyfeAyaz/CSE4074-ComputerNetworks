@@ -1,9 +1,11 @@
+import asyncio
 import select
 import socket
 import errno
 import sys
 import threading
 import time
+import asyncio
 
 
 class PeerUser:
@@ -18,21 +20,23 @@ class PeerUser:
 class Client:
     HEADER_LENGTH = 10
     SERVER_IP = "127.0.0.1"
-    SERVER_PORT = 1234
+    SERVER_PORT = 9000
+    SERVER_UDP_PORT = 9001
     SOCKETS_LIST = []  # 0 = server, 1 = client_server
     PEERS = {}  # key = socket, value = PeerUser
     MESSAGE_TYPES_OUT = {
+        "Logout": "0",      # to server & other client
         "Register": "1",    # to server
         "Login": "2",       # to server
         "Search": "3",      # to server
         "KeepAlive": "4",   # to server
-        "Logout": "0",      # to server
         "Message": "6",     # to other client
-        "ChatRequest": "7",  # to other client
+        "ChatRequest": "7", # to other client
         "ChatAccept": "8",  # to other client
         "ChatReject": "9",  # to other client
     }
     MESSAGE_TYPES_IN = {
+        "Logout": "0",              # from other client
         "RegistrationDenied": "1",  # from server
         "LoginFailed": "2",         # from server
         "LoginSuccess": "3",        # from server
@@ -41,8 +45,6 @@ class Client:
         "ChatRequest": "7",         # from other client
         "ChatAccept": "8",          # from other client
         "ChatReject": "9",          # from other client
-        "Logout": "0",      # to server
-
     }
     MY_PORT = None
     client_server_socket = None
@@ -51,10 +53,12 @@ class Client:
     available = True    # status is user is currently chatting
     peers_waiting_for_chat_accept = []  # peer socket objects waiting for answer
     registered_users = []
+    quit_process = False
 
     # -------------------------<< region INIT START >>-------------------------
     def __init__(self):
         self.establish_connection("Server", self.SERVER_IP, self.SERVER_PORT)
+        self.server_udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
     def build_client_server(self):
         self.client_server_socket = socket.socket(
@@ -106,7 +110,23 @@ class Client:
     # -------------------------<< region SendToServer START >>-------------------------
     def login(self) -> bool:
         username, password = self.ask_for_credentials()
-        # TODO
+        msg_data = username + "*" + password + "*" + self.MY_PORT
+        self.send_message(self.PEERS[self.SOCKETS_LIST[0]], self.MESSAGE_TYPES_OUT["Login"], msg_data)
+
+        self.SOCKETS_LIST[0].setblocking(1)
+        answer = self.receive_message(self.SOCKETS_LIST[0])
+        self.SOCKETS_LIST[0].setblocking(False)
+
+        if answer:
+            if answer['header'] == self.MESSAGE_TYPES_IN["LoginSuccess"]:
+                self.username, self.password = username, password
+                return True
+            else:
+                print("Login Failed - Username or Password is wrong!")
+                return False
+        else:
+            print("Login Failed!")
+            return False
 
     def register(self) -> bool:
         username, password = self.ask_for_credentials()
@@ -118,15 +138,27 @@ class Client:
         self.SOCKETS_LIST[0].setblocking(False)
 
         if answer:
-            print(f"Message type = {answer['header']}")
-            self.username, self.password = username, password
-            return True
+            if answer['header'] == self.MESSAGE_TYPES_IN["LoginSuccess"]:
+                self.username, self.password = username, password
+                return True
+            elif answer['header'] == self.MESSAGE_TYPES_IN["RegistrationDenied"]:
+                print("Registration Failed - Username already taken!")
+                return False
+        else:
+            print("Registration Failed!")
+            return False
 
     def search(self, users: list):
         msg_data = '*'.join(users)
         self.send_message(self.PEERS[self.SOCKETS_LIST[0]], self.MESSAGE_TYPES_OUT["Search"], msg_data)
 
-    
+    def send_keep_alive(self):
+        while not self.quit_process:
+            time.sleep(5)
+            data = self.username.encode("utf-8")
+            self.server_udp_socket.sendto(data, (self.SERVER_IP, self.SERVER_UDP_PORT))
+            print("Sending keep alive to server !")
+
     # -------------------------<< region SendToServer END >>-------------------------
 
     # -------------------------<< region SendToClient START >>-------------------------
@@ -151,7 +183,7 @@ class Client:
         for peer_socket in self.peers_waiting_for_chat_accept:
             self.send_message(self.PEERS[peer_socket], self.MESSAGE_TYPES_OUT["ChatReject"], "rejected the chat request")
             
-            self.remove_peer(peer_socket)
+            # self.remove_peer(peer_socket)
         self.available = True
 
         self.peers_waiting_for_chat_accept = []   
@@ -237,6 +269,7 @@ class Client:
                                 print(f"{self.PEERS[notified_socket].username} {message['data']}")
                                 self.remove_peer(notified_socket)
                                 self.available = True
+                                self.registered_users.pop()
                                 # self.SOCKETS_LIST.remove(notified_socket)
                             elif message['header'] == self.MESSAGE_TYPES_IN["Logout"]:
                                 print(f"{self.PEERS[notified_socket].username} logged out")
@@ -282,7 +315,6 @@ class Client:
                 continue
 
         logged_in = False
-        self.quit_process = False
         while not logged_in:
             l_or_r = input("Do you wanna login (L) or register (R)?: ")
             if l_or_r.lower() == "l":
@@ -293,7 +325,8 @@ class Client:
         self.build_client_server()
         msg_checker_thread = threading.Thread(target=self.check_for_messages)
         msg_checker_thread.start()
-
+        keep_alive_thread = threading.Thread(target=self.send_keep_alive)
+        keep_alive_thread.start()
         while not self.quit_process:
             my_input = input(f'{self.username} > ')
             if (my_input.lower() == "quit") or (my_input.lower() == "logout"):
