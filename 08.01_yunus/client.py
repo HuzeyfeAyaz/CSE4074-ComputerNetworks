@@ -110,7 +110,23 @@ class Client:
     # -------------------------<< region SendToServer START >>-------------------------
     def login(self) -> bool:
         username, password = self.ask_for_credentials()
-        # TODO
+        msg_data = username + "*" + password + "*" + self.MY_PORT
+        self.send_message(self.PEERS[self.SOCKETS_LIST[0]], self.MESSAGE_TYPES_OUT["Login"], msg_data)
+
+        self.SOCKETS_LIST[0].setblocking(1)
+        answer = self.receive_message(self.SOCKETS_LIST[0])
+        self.SOCKETS_LIST[0].setblocking(False)
+
+        if answer:
+            if answer['header'] == self.MESSAGE_TYPES_IN["LoginSuccess"]:
+                self.username, self.password = username, password
+                return True
+            else:
+                print("Login Failed - Username or Password is wrong!")
+                return False
+        else:
+            print("Login Failed!")
+            return False
 
     def register(self) -> bool:
         username, password = self.ask_for_credentials()
@@ -122,9 +138,15 @@ class Client:
         self.SOCKETS_LIST[0].setblocking(False)
 
         if answer:
-            print(f"Message type = {answer['header']}")
-            self.username, self.password = username, password
-            return True
+            if answer['header'] == self.MESSAGE_TYPES_IN["LoginSuccess"]:
+                self.username, self.password = username, password
+                return True
+            elif answer['header'] == self.MESSAGE_TYPES_IN["RegistrationDenied"]:
+                print("Registration Failed - Username already taken!")
+                return False
+        else:
+            print("Registration Failed!")
+            return False
 
     def search(self, users: list):
         msg_data = '*'.join(users)
