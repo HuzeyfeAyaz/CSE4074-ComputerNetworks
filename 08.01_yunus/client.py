@@ -22,17 +22,18 @@ class Client:
     SOCKETS_LIST = []  # 0 = server, 1 = client_server
     PEERS = {}  # key = socket, value = PeerUser
     MESSAGE_TYPES_OUT = {
+        "Logout": "0",      # to server & other client
         "Register": "1",    # to server
         "Login": "2",       # to server
         "Search": "3",      # to server
         "KeepAlive": "4",   # to server
-        "Logout": "0",      # to server
         "Message": "6",     # to other client
-        "ChatRequest": "7",  # to other client
+        "ChatRequest": "7", # to other client
         "ChatAccept": "8",  # to other client
         "ChatReject": "9",  # to other client
     }
     MESSAGE_TYPES_IN = {
+        "Logout": "0",              # from other client
         "RegistrationDenied": "1",  # from server
         "LoginFailed": "2",         # from server
         "LoginSuccess": "3",        # from server
@@ -41,8 +42,6 @@ class Client:
         "ChatRequest": "7",         # from other client
         "ChatAccept": "8",          # from other client
         "ChatReject": "9",          # from other client
-        "Logout": "0",      # to server
-
     }
     MY_PORT = None
     client_server_socket = None
@@ -151,7 +150,7 @@ class Client:
         for peer_socket in self.peers_waiting_for_chat_accept:
             self.send_message(self.PEERS[peer_socket], self.MESSAGE_TYPES_OUT["ChatReject"], "rejected the chat request")
             
-            self.remove_peer(peer_socket)
+            # self.remove_peer(peer_socket)
         self.available = True
 
         self.peers_waiting_for_chat_accept = []   
@@ -237,6 +236,7 @@ class Client:
                                 print(f"{self.PEERS[notified_socket].username} {message['data']}")
                                 self.remove_peer(notified_socket)
                                 self.available = True
+                                self.registered_users.pop()
                                 # self.SOCKETS_LIST.remove(notified_socket)
                             elif message['header'] == self.MESSAGE_TYPES_IN["Logout"]:
                                 print(f"{self.PEERS[notified_socket].username} logged out")
