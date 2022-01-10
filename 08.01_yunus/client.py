@@ -6,7 +6,8 @@ import sys
 import threading
 import time
 import asyncio
-
+import logging
+import random
 
 class PeerUser:
     def __init__(self, ip, port, p_socket, socket_list_index, username):
@@ -57,18 +58,24 @@ class Client:
 
     # -------------------------<< region INIT START >>-------------------------
     def __init__(self):
+        random_int = random.randint(0, 1000000000)
+        logging.basicConfig(filename=f"client_{random_int}.log",
+                format="%(asctime)s — %(name)s — %(levelname)s — %(funcName)s:%(lineno)d — %(message)s",
+                filemode='w',
+                encoding="utf-8")
+        self.logger = logging.getLogger()
+        self.logger.setLevel(logging.DEBUG)    
         self.establish_connection("Server", self.SERVER_IP, self.SERVER_PORT)
         self.server_udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
     def build_client_server(self):
-        self.client_server_socket = socket.socket(
-            socket.AF_INET, socket.SOCK_STREAM)
-        self.client_server_socket.setsockopt(
-            socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.client_server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.client_server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.client_server_socket.bind((self.SERVER_IP, int(self.MY_PORT)))
         self.client_server_socket.listen()
         self.SOCKETS_LIST.append(self.client_server_socket)
         print(f'Listening for connections on {self.SERVER_IP}:{self.MY_PORT}...')
+        self.logger.info(f'Listening for connections on {self.SERVER_IP}:{self.MY_PORT}...')
     # -------------------------<< region INIT END >>-------------------------
 
     # -------------------------<< region MessageIO START >>-------------------------
@@ -93,6 +100,7 @@ class Client:
     def establish_peer_connection(self):
         peer_socket, peer_address = self.client_server_socket.accept()
         print('Accepted new connection from {}:{}'.format(*peer_address))
+        self.logger.info('Accepted new connection from {}:{}'.format(*peer_address))
         self.SOCKETS_LIST.append(peer_socket)
         socket_list_index = len(self.SOCKETS_LIST) - 1
         peer_user = PeerUser(peer_address[0], peer_address[1], peer_socket, socket_list_index, "")
@@ -105,6 +113,7 @@ class Client:
         client_socket.setblocking(False)
         self.SOCKETS_LIST.append(client_socket)
         self.PEERS[client_socket] = PeerUser(IP, PORT, client_socket, len(self.SOCKETS_LIST)-1, Name)
+        self.logger.info(f"Established connection to {Name} on {IP}:{PORT}")
     # -------------------------<< region EstablishConnection END >>-------------------------
 
     # -------------------------<< region SendToServer START >>-------------------------
@@ -120,12 +129,15 @@ class Client:
         if answer:
             if answer['header'] == self.MESSAGE_TYPES_IN["LoginSuccess"]:
                 self.username, self.password = username, password
+                self.logger.info("Login was successful!")
                 return True
             else:
                 print("Login Failed - Username or Password is wrong!")
+                self.logger.warning("Login Failed - Username or Password is wrong!")
                 return False
         else:
-            print("Login Failed!")
+            print("Login Failed - Error while receiving answer from server!")
+            self.logger.error("Login Failed - Error while receiving answer from server!")
             return False
 
     def register(self) -> bool:
@@ -140,12 +152,15 @@ class Client:
         if answer:
             if answer['header'] == self.MESSAGE_TYPES_IN["LoginSuccess"]:
                 self.username, self.password = username, password
+                self.logger.info("Register was successful!")
                 return True
             elif answer['header'] == self.MESSAGE_TYPES_IN["RegistrationDenied"]:
                 print("Registration Failed - Username already taken!")
+                self.logger.warning("Registration Failed - Username already taken!")
                 return False
         else:
-            print("Registration Failed!")
+            print("Registration Failed - Error while receiving answer from server!")
+            self.logger.error("Registration Failed - Error while receiving answer from server!")
             return False
 
     def search(self, users: list):
@@ -154,10 +169,11 @@ class Client:
 
     def send_keep_alive(self):
         while not self.quit_process:
-            time.sleep(5)
+            time.sleep(6)
             data = self.username.encode("utf-8")
             self.server_udp_socket.sendto(data, (self.SERVER_IP, self.SERVER_UDP_PORT))
             print("Sending keep alive to server !")
+            self.logger.info("Sent keep alive ping to server!")
 
     # -------------------------<< region SendToServer END >>-------------------------
 
