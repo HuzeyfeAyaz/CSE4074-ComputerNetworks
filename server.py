@@ -3,12 +3,11 @@ import select
 from datetime import datetime
 import threading
 import time
-import asyncio
 import errno
 import sys
 import logging
 
-
+# User class to represent clients and to store related user information such as IP port username etc. 
 class User:
     name = None
     contact_port = None
@@ -22,29 +21,30 @@ class User:
         self.socket_list_index = socket_list_index
 
 
+# Server class creates a server with tcp and udp socket and listens to peer that communicates with server
 class Server:
-    HEADER_LENGTH = 10
-    IP = "127.0.0.1"
-    PORT = 9000
-    UDP_PORT = 9001
-    CLIENTS = {}  # key = socket, val = User object
-    SOCKETS_LIST = []
+    HEADER_LENGTH = 10  # header length for setting set message len
+    IP = "127.0.0.1"    # localhost
+    PORT = 9000         # TCP socket port for server
+    UDP_PORT = 9001     # UDP socket port for server
+    CLIENTS = {}        # key = socket, val = User object
+    SOCKETS_LIST = []   # List of socket object to store every connected socket to the server
     USER_REGISTRY = {}  # key = username, value = password
-    MESSAGE_TYPES_IN = {
+    MESSAGE_TYPES_IN = {  # Dictionary for server protocol for messages comes in to server  
         "Register": "1",
         "Login": "2",
         "Search": "3",
         "KeepAlive": "4",
         "Logout": "0",
     }
-    MESSAGE_TYPES_OUT = {
+    MESSAGE_TYPES_OUT = { # Dictionary for server protocol for messages goes out from server  
         "RegistrationDenied": "1",
         "LoginFailed": "2",
         "LoginSuccess": "3",
         "SearchResult": "5",
     }
 
-    def __init__(self) -> None:
+    def __init__(self) -> None: # Server creates own logger to log every process. Also when initialized creates tcp and udp sockets of the server
         logging.basicConfig(filename="server.log",
                             format="%(asctime)s — %(name)s — %(levelname)s — %(funcName)s:%(lineno)d — %(message)s",
                             filemode='w',
@@ -71,6 +71,10 @@ class Server:
             f'Checking for keep alive signals on {self.IP}:{self.UDP_PORT}...')
 
     def send_message(self, user: User, msg_data_header: str, msg_data_string=''):
+        """
+        Sends given message to given user based on the message type
+        Performs related byte conversion to send via sockets 
+        """
         message_string = f"{msg_data_header + msg_data_string}".encode("utf-8")
         message_header = f"{len(message_string):<{self.HEADER_LENGTH}}".encode(
             'utf-8')
@@ -78,6 +82,9 @@ class Server:
         print(f"{msg_data_header + ' - ' + msg_data_string}")
 
     def receive_message(self, client_socket):
+        """
+        Function that receives the message sent by the given client 
+        """
         try:
             message_header = client_socket.recv(self.HEADER_LENGTH)
             if not len(message_header):
@@ -91,12 +98,19 @@ class Server:
             return False
 
     def createUserObject(self, client_socket, client_ip, client_port, client_socket_list_index):
+        """
+        Creates user with given informations, socket, ip, port, and socket list index
+        """
         user = User(client_socket, client_ip,
                     client_port, client_socket_list_index)
         self.logger.info(f"Created user IP:{client_ip}, PORT:{client_port}.")
         return user
 
     def registerUser(self, user: User, username, password, port: str) -> None:
+        """
+        Function checks whether the given name is used, otherwise confirms the registration and
+        create a new user and adds the user to user registry
+        """
         try:
             # if user doesn't exist throws an error
             _ = self.USER_REGISTRY[username]
@@ -118,6 +132,10 @@ class Server:
             self.logger.info(f"User {user.name} successfully registered.")
 
     def loginUser(self, user: User, username, password, port: str) -> None:
+        """
+        Checks whther client correctly logged in if not ignores to log in 
+        else accepts the log in and set related user object data relativly
+        """
         try:
             # if user doesn't exist throws an error
             pw_of_user = self.USER_REGISTRY[username]
@@ -137,6 +155,10 @@ class Server:
             self.logger.warning(f"Login failed {username}.")
 
     def establish_connection(self):
+        """
+        Function that creates and establishes the connection from a client to server
+        Also chekcs whther user registers or tries to log in 
+        """
         client_socket, client_address = self.server_socket.accept()
         message = self.receive_message(client_socket)
 
@@ -170,6 +192,11 @@ class Server:
         return True, client_socket
 
     def search(self, user: User, msg_data: str):
+        """
+        checks for every searched users and send back the address of them- 
+        if user registered to registery and has address, server sends the address of it
+        if user does not exists then reports as that user does not exist
+        """
         searched_users = msg_data.split('*')
         searched_users_results = []
         for su in searched_users:
@@ -191,6 +218,9 @@ class Server:
             f"Sent search result to: {user.name}, content: {msg_data}")
 
     def remove_client(self, client_socket: socket):
+        """
+        removes the given socket from server   
+        """
         self.logger.info(
             f"Removing client {self.CLIENTS[client_socket].name}.")
         self.SOCKETS_LIST.remove(client_socket)
@@ -198,11 +228,18 @@ class Server:
         client_socket.close()
 
     def update_last_seen(self, username):
+        """
+        Function to update last seen data of the user used in UDP
+        """
         for client in self.CLIENTS.values():
             if username == client.name:
                 client.last_seen = datetime.now()
 
     def check_for_keep_alive(self):
+        """
+        Function checks for clients if they are alive 
+        receiving message at UDP port from user updates the last seen data of that user 
+        """
         while True:
             data, _addr = self.server_udp_socket.recvfrom(1024)
             data = data.decode("utf-8")
@@ -213,6 +250,9 @@ class Server:
             updater_thread.start()
 
     def find_dead_clients(self, interval: int, max_wait: int):
+        """
+        Function detects the dead clients and removes the dead client if last seen is over 20
+        """
         while True:
             current_time = datetime.now()
             found = False
@@ -231,6 +271,12 @@ class Server:
             time.sleep(interval)
 
     def check_for_messages(self):
+        """
+        Function that checks for message that received at TCP socket
+        If there is a new client connection to server here  the connection established 
+        Messages are checked here. Based on the message header the related answer is 
+        given as we defined in our registry protocol
+        """
         try:
             read_sockets, _, exception_sockets = select.select(
                 self.SOCKETS_LIST, [], self.SOCKETS_LIST)
@@ -256,26 +302,21 @@ class Server:
                 self.remove_client(notified_socket)
 
         except IOError as e:
-            # This is normal on non blocking connections - when there are no incoming data error is going to be raised
-            # Some operating systems will indicate that using AGAIN, and some using WOULDBLOCK error code
-            # We are going to check for both - if one of them - that's expected, means no incoming data, continue as normal
-            # If we got different error code - something happened
             if e.errno != errno.EAGAIN and e.errno != errno.EWOULDBLOCK:
                 print('Reading error: {}'.format(str(e)))
                 self.logger.error('Reading error: {}'.format(str(e)))
                 sys.exit()
 
         except Exception as e:
-            # Any other exception - something happened, exit
             print('Reading error: {}'.format(str(e)))
             self.logger.error('Reading error: {}'.format(str(e)))
             sys.exit()
 
-
+# Here the Server object created and related threads are started 
 if __name__ == '__main__':
     server = Server()
     find_dead_client_thread = threading.Thread(
-        target=server.find_dead_clients, args=[5, 10])
+        target=server.find_dead_clients, args=[5, 20])
     find_dead_client_thread.start()
     keep_alive_checker_thread = threading.Thread(
         target=server.check_for_keep_alive)
