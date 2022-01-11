@@ -6,7 +6,7 @@ import time
 import asyncio
 import errno
 import sys
-
+import logging
 
 class User:
     name = None
@@ -44,6 +44,13 @@ class Server:
     }
 
     def __init__(self) -> None:
+        logging.basicConfig(filename="server.log",
+                            format="%(asctime)s — %(name)s — %(levelname)s — %(funcName)s:%(lineno)d — %(message)s",
+                            filemode='w',
+                            encoding="utf-8")
+        self.logger = logging.getLogger()
+        self.logger.setLevel(logging.DEBUG)
+        
         self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.server_socket.setsockopt(
             socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -51,10 +58,13 @@ class Server:
         self.server_socket.listen()
         self.SOCKETS_LIST.append(self.server_socket)
         print(f'Listening for connections on {self.IP}:{self.PORT}...')
-        
+        self.logger.info(f'Listening for connections on {self.IP}:{self.PORT}...')
+
         self.server_udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.server_udp_socket.bind((self.IP, self.UDP_PORT))
         print(f'Checking for keep alive signals on {self.IP}:{self.UDP_PORT}...')
+        self.logger.info(f'Checking for keep alive signals on {self.IP}:{self.UDP_PORT}...')
+
 
     def send_message(self, user: User, msg_data_header: str, msg_data_string=''):
         message_string = f"{msg_data_header + msg_data_string}".encode("utf-8")
@@ -79,6 +89,7 @@ class Server:
     def createUserObject(self, client_socket, client_ip, client_port, client_socket_list_index):
         user = User(client_socket, client_ip,
                     client_port, client_socket_list_index)
+        self.logger.info(f"Created user IP:{client_ip}, PORT:{client_port}.")
         return user
 
     def registerUser(self, user: User, username, password, port: str) -> None:
@@ -88,15 +99,20 @@ class Server:
             # if user already exists, send message to notify client
             self.send_message(
                 user, self.MESSAGE_TYPES_OUT["RegistrationDenied"])
+            self.logger.info(f"User {user.name}  registeration denied.")
+            
         except:
             self.USER_REGISTRY[username] = password  # add user to registry
             self.send_message(
                 user, self.MESSAGE_TYPES_OUT["LoginSuccess"])
+
             user.last_seen = datetime.now()
             user.name = username
             user.logged_in = True
             user.contact_port = port
             print(f"Registered user: {user.name}")
+            self.logger.info(f"User {user.name} successfully registered.")
+
 
     def loginUser(self, user: User, username, password, port: str) -> None:
         try:
@@ -104,15 +120,19 @@ class Server:
             pw_of_user = self.USER_REGISTRY[username]
             if pw_of_user != password:
                 self.send_message(user, self.MESSAGE_TYPES_OUT["LoginFailed"])
+                self.logger.info(f"Login failed. Wrong password {username}.")
+
             else:
                 self.send_message(user, self.MESSAGE_TYPES_OUT["LoginSuccess"])
+                self.logger.info(f"Succesfull login. User:{username}.")
                 user.last_seen = datetime.now()
                 user.name = username
                 user.logged_in = True
                 user.contact_port = port
         except:
-            self.send_message(
-                user, self.MESSAGE_TYPES_OUT["LoginFailed"])
+            self.send_message(user, self.MESSAGE_TYPES_OUT["LoginFailed"])
+            self.logger.warning(f"Login failed {username}.")
+
 
     def establish_connection(self):
         client_socket, client_address = self.server_socket.accept()
@@ -126,12 +146,14 @@ class Server:
         user = self.createUserObject(
             client_socket, client_address[0], client_address[1], socket_list_index)
         self.CLIENTS[client_socket] = user
-        print('Accepted new connection from {}:{}'.format(
-            *client_address))
-        print(message, message["header"])
+        print('Accepted new connection from {}:{}'.format(*client_address))
+        self.logger.info('Accepted new connection from {}:{}'.format(*client_address))
+
+        # print(message, message["header"])
         if message['header'] == self.MESSAGE_TYPES_IN["Register"]:
             username, password, port = message['data'].split('*')
             print(f"Trying to register user: {username}")
+            self.logger.info(f"Registration attempt. Username:{username}. Creting new thread to handle user requests.")
             t = threading.Thread(target=self.registerUser,
                                  args=[user, username, password, port])
             t.start()
@@ -162,6 +184,7 @@ class Server:
             user, self.MESSAGE_TYPES_OUT["SearchResult"], msg_data)   # TODO
 
     def remove_client(self, client_socket: socket):
+        self.logger.info(f"Removing client {self.CLIENTS[client_socket].name}.")
         self.SOCKETS_LIST.remove(client_socket)
         del self.CLIENTS[client_socket]
         client_socket.close()
@@ -175,7 +198,8 @@ class Server:
         while True:
             data, _addr = self.server_udp_socket.recvfrom(1024)
             data = data.decode("utf-8")
-            print(data)
+            # print(data)
+            self.logger.info(f"Received HELLO from {data} from UDP Port.")
             updater_thread = threading.Thread(target=self.update_last_seen, args=[data])
             updater_thread.start()
     
