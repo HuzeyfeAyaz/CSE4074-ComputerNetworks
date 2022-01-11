@@ -58,14 +58,8 @@ class Client:
 
     # -------------------------<< region INIT START >>-------------------------
     def __init__(self):
-        while True:
-            try:
-                self.MY_PORT = str(10000 + int(input("Please enter your port number (int): ")))
-                break
-            except:
-                continue
         random_int = random.randint(0, 1000000000)
-        logging.basicConfig(filename=f"client_{self.MY_PORT}.log",
+        logging.basicConfig(filename=f"client_{random_int}.log",
                 format="%(asctime)s — %(name)s — %(levelname)s — %(funcName)s:%(lineno)d — %(message)s",
                 filemode='w',
                 encoding="utf-8")
@@ -238,7 +232,6 @@ class Client:
 
     def remove_peer(self, peer_socket):
         self.SOCKETS_LIST.remove(peer_socket)
-        self.logger.info(f"Removing Peer with username: {self.PEERS[peer_socket].username}")
         del self.PEERS[peer_socket]
         try:
             self.peers_waiting_for_chat_accept.remove(peer_socket)
@@ -251,9 +244,7 @@ class Client:
     # -------------------------<< region CheckForMessages START >>-------------------------
     def check_for_messages(self):
         while True:
-            if self.quit_process:
-                self.logger.info("Ending message checker thread!")
-                break
+            if self.quit_process:break
             try:
                 read_sockets, _, exception_sockets = select.select(self.SOCKETS_LIST, [], self.SOCKETS_LIST)
                 for notified_socket in read_sockets:
@@ -268,24 +259,20 @@ class Client:
                                 for ix, user_stat in enumerate(user_stats):
                                     if user_stat.endswith("exist") or user_stat.endswith("offline") :
                                         print(user_stat)
-                                        self.logger.info(user_stat)
                                     else:
                                         user_datail = user_stat.split(' ')  # [[username, ip, port]]
                                         self.registered_users.append([user_datail[0], user_datail[1], user_datail[2]])
                                         print(f"{user_datail[0]} is available at destination: {user_datail[1] + ':' + user_datail[2]}")
-                                        self.logger.info(f"{user_datail[0]} is available at destination: {user_datail[1] + ':' + user_datail[2]}")
                                         self.send_chat_request()
                             elif message['header'] == self.MESSAGE_TYPES_IN["Message"]:
                                 print(f"-->{self.PEERS[notified_socket].username} > {message['data']}")
-                                self.logger.info(f"-->{self.PEERS[notified_socket].username} > {message['data']}")
-                                
+
                             # the other client sent a request
                             elif message['header'] == self.MESSAGE_TYPES_IN["ChatRequest"]:
                                 username = message["data"]
                                 self.PEERS[notified_socket].username = username
                                 self.peers_waiting_for_chat_accept.append(notified_socket)
                                 print(f"{self.PEERS[notified_socket].username} sent a chat request")
-                                self.logger.info(f"{self.PEERS[notified_socket].username} sent a chat request")
 
                             # the other client accepted the chat request
                             elif message['header'] == self.MESSAGE_TYPES_IN["ChatAccept"]:
@@ -293,24 +280,24 @@ class Client:
                                 self.peers_waiting_for_chat_accept = []
                                 self.PEERS[notified_socket].chatting_with = True
                                 print(f"{self.PEERS[notified_socket].username} accepted the chat request")
-                                self.logger.info(f"{self.PEERS[notified_socket].username} accepted the chat request")
 
                             elif message['header'] == self.MESSAGE_TYPES_IN["ChatReject"]:
                                 print(f"{self.PEERS[notified_socket].username} {message['data']}")
-                                self.logger.info(f"{self.PEERS[notified_socket].username} {message['data']}")
                                 self.remove_peer(notified_socket)
                                 self.available = True
                                 self.registered_users.pop()
-                                
+                                # self.SOCKETS_LIST.remove(notified_socket)
                             elif message['header'] == self.MESSAGE_TYPES_IN["Logout"]:
                                 print(f"{self.PEERS[notified_socket].username} logged out")
-                                self.logger.info(f"{self.PEERS[notified_socket].username} logged out")
+                                # TODO
                                 self.remove_peer(notified_socket)
                                 self.available = True
+                                # self.SOCKETS_LIST.remove(notified_socket)
 
                                 
                         else:
-                            self.logger.warning('Closed connection from: {}'.format(self.PEERS[notified_socket].username))
+                            print('Closed connection from: {}'.format(self.PEERS[notified_socket].username))
+
                             self.remove_peer(notified_socket)
                             self.available = True
 
@@ -325,23 +312,23 @@ class Client:
                 # We are going to check for both - if one of them - that's expected, means no incoming data, continue as normal
                 # If we got different error code - something happened
                 if e.errno != errno.EAGAIN and e.errno != errno.EWOULDBLOCK:
-                    self.logger.error('Reading error: {}'.format(str(e)))
+                    print('Reading error: {}'.format(str(e)))
                     sys.exit()
 
             except Exception as e:
                 # Any other exception - something happened, exit
-                self.logger.error('Reading error: {}'.format(str(e)))
+                print('Reading error: {}'.format(str(e)))
                 sys.exit()
     # -------------------------<< region CheckForMessages END >>-------------------------
 
     # -------------------------<< region MAIN START >>-------------------------
     def main_process(self):
-        # while True:
-        #     try:
-        #         self.MY_PORT = str(10000 + int(input("Please enter your port number (int): ")))
-        #         break
-        #     except:
-        #         continue
+        while True:
+            try:
+                self.MY_PORT = str(10000 + int(input("Please enter your port number (int): ")))
+                break
+            except:
+                continue
 
         logged_in = False
         while not logged_in:
@@ -354,16 +341,13 @@ class Client:
         self.build_client_server()
         msg_checker_thread = threading.Thread(target=self.check_for_messages)
         msg_checker_thread.start()
-        self.logger.info("Started message checker thread")
         keep_alive_thread = threading.Thread(target=self.send_keep_alive)
         keep_alive_thread.start()
-        self.logger.info("Started keep alive sender thread")
         while not self.quit_process:
             my_input = input(f'{self.username} > ')
             if (my_input.lower() == "quit") or (my_input.lower() == "logout"):
                 self.quit_process = True
                 self.logout()
-                self.logger.info("Logging out")
                 sys.exit(0)
             elif my_input.startswith("message"):
                 users = my_input.strip().split(' ')[1:]
@@ -376,8 +360,8 @@ class Client:
                 elif my_input.startswith("reject"):
                     self.available = True
                     self.send_chat_reject()
-                elif not self.available:
-                    self.send_chat_message(my_input)
+            elif not self.available:
+                self.send_chat_message(my_input)
     # -------------------------<< region MAIN END >>-------------------------
 
 

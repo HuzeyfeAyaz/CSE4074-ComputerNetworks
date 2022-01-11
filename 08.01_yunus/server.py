@@ -99,7 +99,7 @@ class Server:
             # if user already exists, send message to notify client
             self.send_message(
                 user, self.MESSAGE_TYPES_OUT["RegistrationDenied"])
-            # self.logger.info(f"User {user.name}  registeration denied.")
+            self.logger.info(f"User {user.name}  registeration denied.")
             
         except:
             self.USER_REGISTRY[username] = password  # add user to registry
@@ -111,7 +111,7 @@ class Server:
             user.logged_in = True
             user.contact_port = port
             print(f"Registered user: {user.name}")
-            # self.logger.info(f"User {user.name} successfully registered.")
+            self.logger.info(f"User {user.name} successfully registered.")
 
 
     def loginUser(self, user: User, username, password, port: str) -> None:
@@ -199,7 +199,7 @@ class Server:
             data, _addr = self.server_udp_socket.recvfrom(1024)
             data = data.decode("utf-8")
             # print(data)
-            self.logger.info(f"UDP: Received HELLO from {data}.")
+            self.logger.info(f"Received HELLO from {data} from UDP Port.")
             updater_thread = threading.Thread(target=self.update_last_seen, args=[data])
             updater_thread.start()
     
@@ -213,12 +213,8 @@ class Server:
                     found = True
             if found:
                 print("Removed dead client")
-                self.logger.info(f"Removed dead client.")
-
             else:
                 print("No dead clients found")
-                self.logger.info(f"No dead clients found.")
-
             
             time.sleep(interval)
 
@@ -248,16 +244,12 @@ class Server:
                 # We are going to check for both - if one of them - that's expected, means no incoming data, continue as normal
                 # If we got different error code - something happened
                 if e.errno != errno.EAGAIN and e.errno != errno.EWOULDBLOCK:
-                    # print('Reading error: {}'.format(str(e)))
-                    self.logger.warning(f"Reading error {str(e)}.")
-
+                    print('Reading error: {}'.format(str(e)))
                     sys.exit()
 
         except Exception as e:
             # Any other exception - something happened, exit
-            # print('Reading error: {}'.format(str(e)))
-            self.logger.warning(f"Reading error {str(e)}.")
-
+            print('Reading error: {}'.format(str(e)))
             sys.exit()
             
 
