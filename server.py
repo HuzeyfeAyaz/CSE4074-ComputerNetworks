@@ -8,6 +8,7 @@ import errno
 import sys
 import logging
 
+
 class User:
     name = None
     contact_port = None
@@ -50,7 +51,7 @@ class Server:
                             encoding="utf-8")
         self.logger = logging.getLogger()
         self.logger.setLevel(logging.DEBUG)
-        
+
         self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.server_socket.setsockopt(
             socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -58,13 +59,16 @@ class Server:
         self.server_socket.listen()
         self.SOCKETS_LIST.append(self.server_socket)
         print(f'Listening for connections on {self.IP}:{self.PORT}...')
-        self.logger.info(f'Listening for connections on {self.IP}:{self.PORT}...')
+        self.logger.info(
+            f'Listening for connections on {self.IP}:{self.PORT}...')
 
-        self.server_udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.server_udp_socket = socket.socket(
+            socket.AF_INET, socket.SOCK_DGRAM)
         self.server_udp_socket.bind((self.IP, self.UDP_PORT))
-        print(f'Checking for keep alive signals on {self.IP}:{self.UDP_PORT}...')
-        self.logger.info(f'Checking for keep alive signals on {self.IP}:{self.UDP_PORT}...')
-
+        print(
+            f'Checking for keep alive signals on {self.IP}:{self.UDP_PORT}...')
+        self.logger.info(
+            f'Checking for keep alive signals on {self.IP}:{self.UDP_PORT}...')
 
     def send_message(self, user: User, msg_data_header: str, msg_data_string=''):
         message_string = f"{msg_data_header + msg_data_string}".encode("utf-8")
@@ -100,7 +104,7 @@ class Server:
             self.send_message(
                 user, self.MESSAGE_TYPES_OUT["RegistrationDenied"])
             self.logger.info(f"User {user.name}  registeration denied.")
-            
+
         except:
             self.USER_REGISTRY[username] = password  # add user to registry
             self.send_message(
@@ -112,7 +116,6 @@ class Server:
             user.contact_port = port
             print(f"Registered user: {user.name}")
             self.logger.info(f"User {user.name} successfully registered.")
-
 
     def loginUser(self, user: User, username, password, port: str) -> None:
         try:
@@ -133,7 +136,6 @@ class Server:
             self.send_message(user, self.MESSAGE_TYPES_OUT["LoginFailed"])
             self.logger.warning(f"Login failed {username}.")
 
-
     def establish_connection(self):
         client_socket, client_address = self.server_socket.accept()
         message = self.receive_message(client_socket)
@@ -147,13 +149,15 @@ class Server:
             client_socket, client_address[0], client_address[1], socket_list_index)
         self.CLIENTS[client_socket] = user
         print('Accepted new connection from {}:{}'.format(*client_address))
-        self.logger.info('Accepted new connection from {}:{}'.format(*client_address))
+        self.logger.info(
+            'Accepted new connection from {}:{}'.format(*client_address))
 
         # print(message, message["header"])
         if message['header'] == self.MESSAGE_TYPES_IN["Register"]:
             username, password, port = message['data'].split('*')
             print(f"Trying to register user: {username}")
-            self.logger.info(f"Registration attempt. Username:{username}. Creting new thread to handle user requests.")
+            self.logger.info(
+                f"Registration attempt. Username:{username}. Creting new thread to handle user requests.")
             t = threading.Thread(target=self.registerUser,
                                  args=[user, username, password, port])
             t.start()
@@ -173,7 +177,8 @@ class Server:
                 found = False
                 for us_obj in self.CLIENTS.values():
                     if us_obj.name == su and us_obj.logged_in:
-                        searched_users_results.append(f"{us_obj.name} {us_obj.client_ip} {us_obj.contact_port}")
+                        searched_users_results.append(
+                            f"{us_obj.name} {us_obj.client_ip} {us_obj.contact_port}")
                         found = True
                 if not found:
                     searched_users_results.append(f"{su} is offline")
@@ -181,10 +186,13 @@ class Server:
                 searched_users_results.append(f"{su} does not exist")
         msg_data = "*".join(searched_users_results)
         self.send_message(
-            user, self.MESSAGE_TYPES_OUT["SearchResult"], msg_data)   # TODO
+            user, self.MESSAGE_TYPES_OUT["SearchResult"], msg_data)
+        self.logger.info(
+            f"Sent search result to: {user.name}, content: {msg_data}")
 
     def remove_client(self, client_socket: socket):
-        self.logger.info(f"Removing client {self.CLIENTS[client_socket].name}.")
+        self.logger.info(
+            f"Removing client {self.CLIENTS[client_socket].name}.")
         self.SOCKETS_LIST.remove(client_socket)
         del self.CLIENTS[client_socket]
         client_socket.close()
@@ -193,33 +201,37 @@ class Server:
         for client in self.CLIENTS.values():
             if username == client.name:
                 client.last_seen = datetime.now()
-    
+
     def check_for_keep_alive(self):
         while True:
             data, _addr = self.server_udp_socket.recvfrom(1024)
             data = data.decode("utf-8")
             # print(data)
             self.logger.info(f"Received HELLO from {data} from UDP Port.")
-            updater_thread = threading.Thread(target=self.update_last_seen, args=[data])
+            updater_thread = threading.Thread(
+                target=self.update_last_seen, args=[data])
             updater_thread.start()
-    
+
     def find_dead_clients(self, interval: int, max_wait: int):
         while True:
             current_time = datetime.now()
             found = False
             for client in self.CLIENTS.copy().values():
                 if (current_time - client.last_seen).seconds > max_wait:
+                    self.logger.info(f"Found dead client: {client.name}")
                     self.remove_client(client.client_socket)
                     found = True
             if found:
-                print("Removed dead client")
+                print("Removed all dead clients")
+                self.logger.info("Removed all dead clients")
             else:
                 print("No dead clients found")
-            
+                self.logger.info("No dead clients found")
+
             time.sleep(interval)
 
     def check_for_messages(self):
-        try: 
+        try:
             read_sockets, _, exception_sockets = select.select(
                 self.SOCKETS_LIST, [], self.SOCKETS_LIST)
             for notified_socket in read_sockets:
@@ -231,34 +243,42 @@ class Server:
                     print(
                         f"Message type: {message['header']}, message content: {message['data']}")
                     if message['header'] == self.MESSAGE_TYPES_IN["Search"]:
-                        self.search(self.CLIENTS[notified_socket], message['data'])
+                        self.logger.info(
+                            f"Received search request from: {self.CLIENTS[notified_socket].name} for users: {message['data'].split('*')}")
+                        self.search(
+                            self.CLIENTS[notified_socket], message['data'])
                     elif message['header'] == self.MESSAGE_TYPES_IN["Logout"]:
+                        self.logger.info(
+                            f"Received logout request from {self.CLIENTS[notified_socket].name}")
                         self.remove_client(notified_socket)
 
             for notified_socket in exception_sockets:
                 self.remove_client(notified_socket)
-                
+
         except IOError as e:
-                # This is normal on non blocking connections - when there are no incoming data error is going to be raised
-                # Some operating systems will indicate that using AGAIN, and some using WOULDBLOCK error code
-                # We are going to check for both - if one of them - that's expected, means no incoming data, continue as normal
-                # If we got different error code - something happened
-                if e.errno != errno.EAGAIN and e.errno != errno.EWOULDBLOCK:
-                    print('Reading error: {}'.format(str(e)))
-                    sys.exit()
+            # This is normal on non blocking connections - when there are no incoming data error is going to be raised
+            # Some operating systems will indicate that using AGAIN, and some using WOULDBLOCK error code
+            # We are going to check for both - if one of them - that's expected, means no incoming data, continue as normal
+            # If we got different error code - something happened
+            if e.errno != errno.EAGAIN and e.errno != errno.EWOULDBLOCK:
+                print('Reading error: {}'.format(str(e)))
+                self.logger.error('Reading error: {}'.format(str(e)))
+                sys.exit()
 
         except Exception as e:
             # Any other exception - something happened, exit
             print('Reading error: {}'.format(str(e)))
+            self.logger.error('Reading error: {}'.format(str(e)))
             sys.exit()
-            
 
 
 if __name__ == '__main__':
     server = Server()
-    find_dead_client_thread = threading.Thread(target=server.find_dead_clients, args=[5, 10])
+    find_dead_client_thread = threading.Thread(
+        target=server.find_dead_clients, args=[5, 10])
     find_dead_client_thread.start()
-    keep_alive_checker_thread = threading.Thread(target=server.check_for_keep_alive)
+    keep_alive_checker_thread = threading.Thread(
+        target=server.check_for_keep_alive)
     keep_alive_checker_thread.start()
     while True:
         server.check_for_messages()
