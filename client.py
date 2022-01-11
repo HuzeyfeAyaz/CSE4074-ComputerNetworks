@@ -1,13 +1,10 @@
-import asyncio
 import select
 import socket
 import errno
 import sys
 import threading
 import time
-import asyncio
 import logging
-import random
 
 
 class PeerUser:

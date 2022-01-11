@@ -3,7 +3,6 @@ import select
 from datetime import datetime
 import threading
 import time
-import asyncio
 import errno
 import sys
 import logging
@@ -317,7 +316,7 @@ class Server:
 if __name__ == '__main__':
     server = Server()
     find_dead_client_thread = threading.Thread(
-        target=server.find_dead_clients, args=[5, 10])
+        target=server.find_dead_clients, args=[5, 20])
     find_dead_client_thread.start()
     keep_alive_checker_thread = threading.Thread(
         target=server.check_for_keep_alive)
